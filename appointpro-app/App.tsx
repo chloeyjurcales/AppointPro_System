@@ -1026,7 +1026,7 @@ function AppContent() {
       supabase
         .from('appointments')
         .select(
-          `id, faculty_id, date, start_time, end_time, category, mode, location, status, reference_no,
+          `id, faculty_id, date, start_time, end_time, category, mode, location, status, student_approval_status, faculty_approval_status, reference_no,
            faculty ( department, profiles ( full_name, avatar_url ) )`
         )
         .eq('student_id', studentId)
@@ -1458,7 +1458,13 @@ function AppContent() {
     if (facultyQueueSyncRef.current) return;
     const today = toDateKey(nowTick);
     const eligible = facultyAppointments.filter((appointment) => {
-      if (appointment.status !== 'upcoming' || appointment.dateKey !== today || !appointment.startTime24) return false;
+      if (
+        appointment.status !== 'upcoming' ||
+        appointment.dateKey !== today ||
+        !appointment.startTime24 ||
+        appointment.studentApprovalStatus !== 'approved' ||
+        appointment.facultyApprovalStatus !== 'approved'
+      ) return false;
       return hasQueueOpened(appointment.dateKey, appointment.startTime24, nowTick);
     });
     if (eligible.length === 0) return;
@@ -1545,7 +1551,7 @@ function AppContent() {
       supabase
         .from('appointments')
         .select(
-          `id, student_id, date, start_time, end_time, category, mode, location, status, meeting_link, reference_no,
+          `id, student_id, date, start_time, end_time, category, mode, location, status, student_approval_status, faculty_approval_status, meeting_link, reference_no,
            students ( student_id, department, year_level, profiles ( full_name, email, avatar_url ) )`
         )
         .eq('faculty_id', facultyId)
@@ -1584,7 +1590,13 @@ function AppContent() {
   // Today's upcoming appointments (sorted), used for FacultyHomeScreen's
   // "Today's Overview" stat and "Today's Schedule" list.
   const todaysFacultyAppointments = facultyAppointments
-    .filter((a) => a.status === 'upcoming' && a.dateKey === toDateKey(nowTick))
+    .filter(
+      (a) =>
+        a.status === 'upcoming' &&
+        a.dateKey === toDateKey(nowTick) &&
+        a.studentApprovalStatus === 'approved' &&
+        a.facultyApprovalStatus === 'approved'
+    )
     .sort((a, b) => (a.startTime24 ?? '').localeCompare(b.startTime24 ?? ''));
 
   const todaysFacultySchedule: ScheduleItem[] = todaysFacultyAppointments.map((a) => ({

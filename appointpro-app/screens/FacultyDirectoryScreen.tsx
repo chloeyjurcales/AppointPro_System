@@ -12,8 +12,7 @@ import { Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
-type AppointmentStatus = 'upcoming' | 'completed' | 'cancelled';
-type FilterKey = AppointmentStatus | 'pendingApproval';
+type AppointmentStatus = 'upcoming' | 'pending' | 'completed' | 'cancelled';
 type ConsultationMode = 'face-to-face' | 'online';
 
 export type StudentAppointment = {
@@ -126,8 +125,8 @@ export type DbFacultyAppointment = {
   status: 'upcoming' | 'completed' | 'canceled';
   meeting_link: string | null;
   reference_no?: string | null;
-  student_approval_status: 'pending' | 'approved' | 'declined';
-  faculty_approval_status: 'pending' | 'approved' | 'declined';
+  student_approval_status?: 'pending' | 'approved' | 'declined' | null;
+  faculty_approval_status?: 'pending' | 'approved' | 'declined' | null;
   students: {
     student_id: string;
     department: string | null;
@@ -188,14 +187,14 @@ export function mapDbFacultyAppointment(row: DbFacultyAppointment): StudentAppoi
     endTime24: row.end_time,
     startTimeLabel: formatFacultyApptTime12h(row.start_time),
     referenceNo: row.reference_no ?? undefined,
-    studentApprovalStatus: row.student_approval_status,
-    facultyApprovalStatus: row.faculty_approval_status,
+    studentApprovalStatus: row.student_approval_status ?? 'approved',
+    facultyApprovalStatus: row.faculty_approval_status ?? 'approved',
   };
 }
 
-const TABS: { key: FilterKey; label: string }[] = [
-  { key: 'pendingApproval', label: 'Pending Approval' },
+const TABS: { key: AppointmentStatus; label: string }[] = [
   { key: 'upcoming', label: 'Upcoming' },
+  { key: 'pending', label: 'Pending Approval' },
   { key: 'completed', label: 'Completed' },
   { key: 'cancelled', label: 'Cancelled' },
 ];
@@ -205,8 +204,6 @@ type FacultyDirectoryScreenProps = {
   onSelectAppointment?: (appointment: StudentAppointment) => void;
   onReschedulePress?: (appointment: StudentAppointment) => void;
   onCancelPress?: (appointment: StudentAppointment) => void;
-  onApprovePress?: (appointment: StudentAppointment) => void;
-  onDeclinePress?: (appointment: StudentAppointment) => void;
   onTabChange?: (tab: FacultyTabKey) => void;
 };
 
@@ -215,21 +212,24 @@ export default function FacultyDirectoryScreen({
   onSelectAppointment,
   onReschedulePress,
   onCancelPress,
-  onApprovePress,
-  onDeclinePress,
   onTabChange,
 }: FacultyDirectoryScreenProps) {
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('upcoming');
+  const [activeFilter, setActiveFilter] = useState<AppointmentStatus>('upcoming');
 
   const source = appointments ?? DEFAULT_APPOINTMENTS;
-  const filtered = source.filter((a) => {
-    if (activeFilter === 'pendingApproval') {
-      return a.status === 'upcoming' && a.studentApprovalStatus === 'approved' && a.facultyApprovalStatus === 'pending';
-    }
+
+  const isFullyApproved = (appointment: StudentAppointment) =>
+    (appointment.studentApprovalStatus ?? 'approved') === 'approved' &&
+    (appointment.facultyApprovalStatus ?? 'approved') === 'approved';
+
+  const filtered = source.filter((appointment) => {
     if (activeFilter === 'upcoming') {
-      return a.status === 'upcoming' && a.studentApprovalStatus === 'approved' && a.facultyApprovalStatus === 'approved';
+      return appointment.status === 'upcoming' && isFullyApproved(appointment);
     }
-    return a.status === activeFilter;
+    if (activeFilter === 'pending') {
+      return appointment.status === 'upcoming' && !isFullyApproved(appointment);
+    }
+    return appointment.status === activeFilter;
   });
 
   return (
@@ -294,20 +294,29 @@ export default function FacultyDirectoryScreen({
               </View>
             </View>
 
-            {activeFilter === 'pendingApproval' && (
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => onApprovePress?.(item)}
+            {activeFilter === 'pending' && (
+              <View style={styles.approvalStatusWrap}>
+                <View
+                  style={[
+                    styles.approvalBadge,
+                    (item.studentApprovalStatus ?? 'approved') === 'pending'
+                      ? styles.approvalBadgeWaiting
+                      : styles.approvalBadgeReady,
+                  ]}
                 >
-                  <Text style={styles.actionButtonText}>Approve</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.actionButtonDanger]}
-                  onPress={() => onDeclinePress?.(item)}
-                >
-                  <Text style={styles.actionButtonDangerText}>Decline</Text>
-                </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.approvalBadgeText,
+                      (item.studentApprovalStatus ?? 'approved') === 'pending'
+                        ? styles.approvalBadgeWaitingText
+                        : styles.approvalBadgeReadyText,
+                    ]}
+                  >
+                    {(item.studentApprovalStatus ?? 'approved') === 'pending'
+                      ? 'WAITING FOR STUDENT APPROVAL'
+                      : 'READY FOR FACULTY APPROVAL'}
+                  </Text>
+                </View>
               </View>
             )}
 
@@ -436,6 +445,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  approvalStatusWrap: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  approvalBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderWidth: 1,
+  },
+  approvalBadgeWaiting: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+  },
+  approvalBadgeReady: {
+    backgroundColor: colors.primary + '12',
+    borderColor: colors.primary,
+  },
+  approvalBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  approvalBadgeWaitingText: {
+    color: colors.textMuted,
+  },
+  approvalBadgeReadyText: {
+    color: colors.primary,
   },
   actionsRow: {
     flexDirection: 'row',
