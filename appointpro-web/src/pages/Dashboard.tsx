@@ -81,6 +81,7 @@ type DbTodayAppointment = {
   start_time: string;
   end_time: string;
   category: string | null;
+  purpose: string | null;
   status: string;
   students: {
     profiles: { full_name: string } | { full_name: string }[] | null;
@@ -96,7 +97,7 @@ function mapDbTodayAppointment(row: DbTodayAppointment): ScheduleItem {
     id: row.id,
     time: `${formatClockTime(row.start_time)} – ${formatClockTime(row.end_time)}`,
     studentName: profile?.full_name ?? 'Unknown Student',
-    type: row.category ?? 'Consultation',
+    type: row.purpose ?? row.category ?? 'Consultation',
     status: STATUS_LABELS[row.status] ?? 'Upcoming',
   };
 }
@@ -243,7 +244,7 @@ export default function Dashboard({
       supabase
         .from('appointments')
         .select(
-          `id, start_time, end_time, category, status,
+          `id, start_time, end_time, category, purpose, status,
            students ( profiles ( full_name ) )`,
         )
         .eq('faculty_id', facultyId)
@@ -523,9 +524,15 @@ export default function Dashboard({
               {unreadNotificationCount > 0 && <span className="db-icon-dot" />}
             </button>
 
-            <span className="db-avatar">
+            <button
+              type="button"
+              className="db-avatar db-avatar-button"
+              aria-label="Open my profile"
+              title="View my profile"
+              onClick={() => handleNavClick('faculty', 'profile')}
+            >
               {avatarUrl ? <img src={avatarUrl} alt="" /> : initials}
-            </span>
+            </button>
           </div>
         </header>
 

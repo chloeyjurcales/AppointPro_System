@@ -36,6 +36,10 @@ type FacultyHomeScreenProps = {
   appointmentsCount?: number;
   pendingReschedulesCount?: number;
   walkInQueueCount?: number;
+  queueWindowActive?: boolean;
+  queueStartsInSeconds?: number;
+  queueAppointmentTime?: string;
+  queueStudentName?: string;
   // Today's real appointments (already filtered/sorted by the caller).
   // Falls back to a small mock list so this screen still works standalone.
   schedule?: ScheduleItem[];
@@ -64,6 +68,10 @@ export default function FacultyHomeScreen({
   appointmentsCount = 8,
   pendingReschedulesCount = 2,
   walkInQueueCount = 6,
+  queueWindowActive = false,
+  queueStartsInSeconds = 0,
+  queueAppointmentTime,
+  queueStudentName,
   schedule = FALLBACK_SCHEDULE,
   onMenuPress,
   onNotificationsPress,
@@ -161,6 +169,26 @@ export default function FacultyHomeScreen({
             <Text style={styles.link}>View all</Text>
           </TouchableOpacity>
         </View>
+
+        {queueWindowActive && (
+          <TouchableOpacity style={styles.queueAlertCard} onPress={onOpenWalkInQueue} activeOpacity={0.82}>
+            <View style={styles.queueAlertIconWrap}>
+              <Ionicons name="time-outline" size={22} color={colors.white} />
+            </View>
+            <View style={styles.queueAlertTextWrap}>
+              <Text style={styles.queueAlertTitle}>Upcoming Consultation</Text>
+              <Text style={styles.queueAlertStudent}>
+                {queueStudentName ? `${queueStudentName} · ${queueAppointmentTime ?? ''}` : queueAppointmentTime ?? 'Appointment coming up'}
+              </Text>
+              <Text style={styles.queueAlertCountdown}>
+                {queueStartsInSeconds > 0
+                  ? `Starts in ${Math.floor(queueStartsInSeconds / 60)}:${String(queueStartsInSeconds % 60).padStart(2, '0')}`
+                  : 'Appointment is starting now'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
 
         <View style={styles.card}>
           {schedule.length === 0 ? (
@@ -326,6 +354,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.link,
     fontWeight: '600',
+  },
+  queueAlertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 12,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.white,
+  },
+  queueAlertIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  queueAlertTextWrap: {
+    flex: 1,
+  },
+  queueAlertTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textDark,
+  },
+  queueAlertStudent: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  queueAlertCountdown: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+    marginTop: 5,
   },
   card: {
     backgroundColor: colors.white,

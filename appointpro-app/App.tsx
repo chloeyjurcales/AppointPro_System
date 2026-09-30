@@ -23,10 +23,13 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './screens/LoginScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
+import ResetPasswordScreen from './screens/ResetPasswordScreen';
+import * as Linking from 'expo-linking';
 import SettingsScreen from './screens/SettingsScreen';
 import AccountTypeScreen from './screens/AccountTypeScreen';
 import StudentSignUpScreen from './screens/StudentSignUpScreen';
 import FacultySignUpScreen from './screens/FacultySignUpScreen';
+import VerifyEmailScreen from './screens/VerifyEmailScreen';
 import HomeScreen from './screens/HomeScreen';
 import DirectoryScreen, { FacultyMember } from './screens/DirectoryScreen';
 import FacultyProfileScreen from './screens/FacultyProfileScreen';
@@ -93,10 +96,11 @@ import {
   mapDbQueueEntry,
   sortQueueByScheduledTime,
   getScheduledTimeRangeLabel,
-  AVERAGE_WAIT_MINUTES_PER_STUDENT,
-  hasQueueOpened,
   hasAppointmentStartedAt,
+  getPhilippineDateKey,
   getSecondsUntilAppointment,
+  getAppointmentStartDate,
+  isQueueWindowActive,
 } from './data/queue';
 import {
   NotificationItem,
@@ -107,9 +111,11 @@ import {
 type Screen =
   | 'login'
   | 'forgotPassword'
+  | 'resetPassword'
   | 'accountType'
   | 'studentSignUp'
   | 'facultySignUp'
+  | 'verifyEmail'
   | 'home'
   | 'directory'
   | 'facultyProfile'
@@ -219,21 +225,11 @@ function hasTimeArrived(
   now: Date
 ): boolean {
   if (!dateKey || !bookedTimeRangeLabel) return false;
-  if (dateKey !== toDateKey(now)) return false;
+  if (dateKey !== getPhilippineDateKey(now)) return false;
 
   const startPart = bookedTimeRangeLabel.split('-')[0]?.trim();
-  const match = startPart?.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-  if (!match) return false;
-
-  let hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  const meridiem = match[3].toUpperCase();
-  if (meridiem === 'PM' && hours !== 12) hours += 12;
-  if (meridiem === 'AM' && hours === 12) hours = 0;
-
-  const startTime = new Date(now);
-  startTime.setHours(hours, minutes, 0, 0);
-  return now.getTime() >= startTime.getTime();
+  const start24 = labelTo24h(startPart || '12:00 AM');
+  return hasAppointmentStartedAt(dateKey, start24, now);
 }
 
 // --- Faculty availability: DB row shapes + mapping to/from the local
@@ -582,6 +578,9 @@ function AppContent() {
   // split second after the first one already succeeded, which Supabase
   // correctly — but confusingly — reports as "already registered").
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  // Email address currently waiting for its verification code. Set right
+  // after sign-up (or when an unverified user tries to log in).
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState('');
 
   // Pulls the signed-in user's real profile (+ role-specific student/
   // faculty row) from Supabase and populates studentProfile/facultyProfile
@@ -801,10 +800,55 @@ function AppContent() {
   useEffect(() => {
     let isMounted = true;
 
-    supabase.auth.signOut().finally(() => {
+    // Handles the link in the password-reset email. Supabase puts the
+    // tokens after "#" (or "?code=" when PKCE is used). Must run AFTER the
+    // launch sign-out below, otherwise the sign-out would erase the
+    // recovery session this link creates.
+    const handleAuthLink = async (url: string | null) => {
+      if (!url || !isMounted) return;
+
+      const fragment = url.includes('#') ? url.split('#')[1] : '';
+      const query = url.includes('?') ? url.split('?')[1].split('#')[0] : '';
+      const params = new URLSearchParams(fragment || query);
+
+      if (params.get('error')) {
+        showToast('This reset link is invalid or has expired. Please request a new one.');
+        setScreen('forgotPassword');
+        return;
+      }
+
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const code = params.get('code');
+
+      let ok = false;
+      if (accessToken && refreshToken && params.get('type') === 'recovery') {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        ok = !error;
+      } else if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        ok = !error;
+      } else {
+        return; // not a reset link
+      }
+
+      if (!isMounted) return;
+      if (ok) setScreen('resetPassword');
+      else showToast('Could not open the reset link. Please request a new one.');
+    };
+
+    supabase.auth.signOut().finally(async () => {
       if (!isMounted) return;
       setSession(null);
       setAuthLoading(false);
+      handleAuthLink(await Linking.getInitialURL()); // app opened from the link
+    });
+
+    const linkSub = Linking.addEventListener('url', ({ url }) => {
+      handleAuthLink(url); // app was already open
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
@@ -824,6 +868,7 @@ function AppContent() {
     return () => {
       isMounted = false;
       authListener.subscription.unsubscribe();
+      linkSub.remove();
     };
   }, []);
 
@@ -846,26 +891,19 @@ function AppContent() {
 
     let isMounted = true;
 
-    const loadNotifications = async () => {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
-      if (!isMounted) return;
-      if (error) {
-        console.log('Failed to load notifications:', error.message);
-        return;
-      }
-      setStudentNotifications((data as DbNotification[]).map(mapDbNotification));
-    };
-
-    loadNotifications();
-
-    // Realtime is the primary path. This lightweight refresh is a fallback
-    // for development/device sessions where Realtime delivery is delayed or
-    // the notifications table has not yet been added to the publication.
-    const refreshTimer = setInterval(loadNotifications, 10000);
+    supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          console.log('Failed to load notifications:', error.message);
+          return;
+        }
+        setStudentNotifications((data as DbNotification[]).map(mapDbNotification));
+      });
 
     const channel = supabase
       .channel(`notifications-${session.user.id}`)
@@ -879,10 +917,7 @@ function AppContent() {
         },
         (payload) => {
           const newItem = mapDbNotification(payload.new as DbNotification);
-          setStudentNotifications((prev) => {
-            if (prev.some((item) => item.id === newItem.id)) return prev;
-            return [newItem, ...prev];
-          });
+          setStudentNotifications((prev) => [newItem, ...prev]);
           if (soundEnabledRef.current) {
             try {
               notificationSoundPlayer.seekTo(0);
@@ -898,7 +933,6 @@ function AppContent() {
 
     return () => {
       isMounted = false;
-      clearInterval(refreshTimer);
       supabase.removeChannel(channel);
     };
   }, [session]);
@@ -1026,7 +1060,7 @@ function AppContent() {
       supabase
         .from('appointments')
         .select(
-          `id, faculty_id, date, start_time, end_time, category, mode, location, status, student_approval_status, faculty_approval_status, reference_no,
+          `id, faculty_id, date, start_time, end_time, category, purpose, mode, location, status, reference_no, student_approval_status, faculty_approval_status,
            faculty ( department, profiles ( full_name, avatar_url ) )`
         )
         .eq('student_id', studentId)
@@ -1046,6 +1080,12 @@ function AppContent() {
 
     loadStudentAppointments();
 
+    // Realtime normally updates the student's appointment list immediately.
+    // Keep a short polling fallback as well so a faculty action such as
+    // "Done — Call Next" still moves the appointment to Completed even when
+    // Realtime delivery is delayed or unavailable on the current connection.
+    const pollId = setInterval(loadStudentAppointments, 2000);
+
     const channel = supabase
       .channel(`student-appointments-${studentId}`)
       .on(
@@ -1057,6 +1097,7 @@ function AppContent() {
 
     return () => {
       isMounted = false;
+      clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, [session, userRole]);
@@ -1192,8 +1233,8 @@ function AppContent() {
   // confused with the queue of the faculty they actually have an appointment with.
   const [queueViewFacultyId, setQueueViewFacultyId] = useState<string | null>(null);
 
-  // Ticks every second so the live countdowns (session time remaining,
-  // estimated wait) actually move in real time, and so a booked
+  // Ticks every second so the live appointment countdowns move in real time
+  // and a booked
   // appointment's start time gets picked up right on time.
   const [nowTick, setNowTick] = useState(() => new Date());
   useEffect(() => {
@@ -1212,10 +1253,38 @@ function AppContent() {
     nextStudentAppointment && nextStudentAppointment.dateKey === toDateKey(nowTick)
       ? nextStudentAppointment
       : null;
-  const todaysApptQueueOpen =
-    !!todaysStudentAppointment &&
-    hasQueueOpened(todaysStudentAppointment.dateKey, todaysStudentAppointment.startTime24, nowTick);
 
+  // Only fully approved appointments are allowed to enter the live queue.
+  // The queue opens one hour before the consultation and stays active until
+  // the booked end time.
+  const todaysStudentQueueAppointment =
+    studentAppointments
+      .filter(
+        (a) =>
+          a.status === 'upcoming' &&
+          a.dateKey === getPhilippineDateKey(nowTick) &&
+          !!a.startTime24 &&
+          !!a.endTime24 &&
+          (a.facultyApprovalStatus ?? 'approved') === 'approved'
+      )
+      .sort((a, b) => (a.startTime24 ?? '').localeCompare(b.startTime24 ?? ''))[0] ?? null;
+
+  const studentQueueWindowActive = todaysStudentQueueAppointment
+    ? isQueueWindowActive(
+        todaysStudentQueueAppointment.dateKey,
+        todaysStudentQueueAppointment.startTime24,
+        todaysStudentQueueAppointment.endTime24,
+        nowTick
+      )
+    : false;
+
+  const studentQueueStartsInSeconds = todaysStudentQueueAppointment
+    ? getSecondsUntilAppointment(
+        todaysStudentQueueAppointment.dateKey,
+        todaysStudentQueueAppointment.startTime24,
+        nowTick
+      )
+    : 0;
   // Which faculty's real queue this client cares about: faculty watch
   // their own; students watch the faculty they have an appointment with
   // today (or one they're explicitly viewing / browsing). Both sides
@@ -1307,80 +1376,75 @@ function AppContent() {
     setCurrentStudentQueueId(mine?.id ?? null);
   }, [queue, studentAppointments, confirmedBooking, userRole]);
 
-  // Student-side fallback: when the queue opens one hour before the
-  // appointment, make sure this student's appointment has a real queue row.
-  // The faculty client also performs the same reconciliation for every
-  // appointment, so either side can bring the queue online. The unique DB
-  // index prevents both clients from creating duplicates.
+  // Student-side queue reconciler. The queue opens one hour before the
+  // approved appointment begins, so the student can see the queue and the
+  // countdown before the actual consultation starts.
   const joiningQueueRef = useRef(false);
   const reminderSentRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!confirmedBooking || !session) return;
-    // The faculty this appointment is actually with — NOT whichever faculty
-    // the student happens to be browsing now (using selectedFaculty here put
-    // the queue row and reminders on the wrong faculty after browsing).
-    const bookedFacultyId =
-      studentAppointments.find((a) => a.id === confirmedBooking.bookingId)?.facultyId ??
-      selectedFaculty?.id;
-    if (!bookedFacultyId) return;
-    const bookedFaculty = facultyDirectory.find((f) => f.id === bookedFacultyId);
-    if (confirmedBooking.dateKey !== toDateKey(nowTick)) return;
-    const startPart = confirmedBooking.bookedTimeRangeLabel.split('-')[0]?.trim();
-    const start24 = labelTo24h(startPart || '12:00 AM');
-    if (!hasQueueOpened(confirmedBooking.dateKey, start24, nowTick)) return;
+    if (userRole !== 'student' || !session) return;
+    const appointment = todaysStudentQueueAppointment;
+    if (!appointment || !studentQueueWindowActive) return;
+    if (!appointment.dateKey || !appointment.startTime24 || !appointment.endTime24) return;
 
-    const appointmentKey = confirmedBooking.bookingId;
-    if (!queue.some((q) => q.appointmentId === appointmentKey) && !joiningQueueRef.current) {
-      joiningQueueRef.current = true;
-      supabase
-        .from('queue_entries')
-        .select('id')
-        .eq('appointment_id', appointmentKey)
-        .maybeSingle()
-        .then(async ({ data: existing, error: lookupError }) => {
-          if (lookupError) console.log('Could not check queue entry:', lookupError.message);
-          if (!existing) {
-            const { data: positionRows } = await supabase
-              .from('queue_entries')
-              .select('position')
-              .eq('faculty_id', bookedFacultyId)
-              .eq('queue_date', confirmedBooking.dateKey)
-              .order('position', { ascending: false })
-              .limit(1);
-            const nextPosition = ((positionRows?.[0] as { position?: number } | undefined)?.position ?? 0) + 1;
-            const { error } = await supabase.from('queue_entries').insert({
-              faculty_id: bookedFacultyId,
-              appointment_id: appointmentKey,
-              student_name: studentProfile.name,
-              duration_minutes: confirmedBooking.durationMinutes,
-              queue_date: confirmedBooking.dateKey,
-              position: nextPosition,
-            });
-            if (error && error.code !== '23505') console.log('Failed to join queue:', error.message);
+    const appointmentKey = appointment.id;
+    const bookedFacultyId = appointment.facultyId;
+    if (!bookedFacultyId || joiningQueueRef.current) return;
 
-            // One reminder, sent only by whichever client actually created the
-            // queue row. Both the student and faculty clients try to create it,
-            // and each used to send its own reminder, so both people got the
-            // same notification twice.
-            if (!error && !reminderSentRef.current.has(appointmentKey)) {
-              reminderSentRef.current.add(appointmentKey);
-              const facultyName = bookedFaculty?.name || 'your faculty member';
-              sendNotification(session.user.id, {
-                icon: 'notifications-outline',
-                title: 'Your Appointment Is Coming Up',
-                description: `Your appointment with ${facultyName} starts at ${startPart}. Please get ready — your queue is now open.`,
-              });
-              sendNotification(bookedFacultyId, {
-                icon: 'notifications-outline',
-                title: 'Upcoming Appointment',
-                description: `${studentProfile.name}'s appointment starts at ${startPart}. The queue is now open.`,
-              });
-            }
-          }
-          joiningQueueRef.current = false;
-        });
-    }
-  }, [confirmedBooking, session, selectedFaculty, facultyDirectory, studentAppointments, nowTick, queue, studentProfile.name]);
+    joiningQueueRef.current = true;
+    supabase
+      .from('queue_entries')
+      .select('id')
+      .eq('appointment_id', appointmentKey)
+      .maybeSingle()
+      .then(async ({ data: existing, error: lookupError }) => {
+        if (lookupError) console.log('Could not check queue entry:', lookupError.message);
+        let createdQueueEntry = false;
+
+        if (!existing) {
+          const { data: positionRows } = await supabase
+            .from('queue_entries')
+            .select('position')
+            .eq('faculty_id', bookedFacultyId)
+            .eq('queue_date', appointment.dateKey)
+            .order('position', { ascending: false })
+            .limit(1);
+          const nextPosition = ((positionRows?.[0] as { position?: number } | undefined)?.position ?? 0) + 1;
+
+          const { error } = await supabase.from('queue_entries').insert({
+            faculty_id: bookedFacultyId,
+            appointment_id: appointmentKey,
+            student_name: studentProfile.name,
+            duration_minutes: Math.max(1, minutesBetween(appointment.startTime24!, appointment.endTime24!)),
+            queue_date: appointment.dateKey,
+            position: nextPosition,
+          });
+          if (error && error.code !== '23505') console.log('Failed to join queue:', error.message);
+          createdQueueEntry = !error;
+        }
+
+        // The client that creates the queue row announces the one-hour
+        // warning to both people. The row's unique appointment constraint
+        // prevents the student and faculty clients from creating duplicates.
+        if (createdQueueEntry && !reminderSentRef.current.has(appointmentKey)) {
+          reminderSentRef.current.add(appointmentKey);
+          const facultyName = appointment.doctorName || 'your faculty member';
+          const timeLabel = appointment.date.split(' · ')[1] ?? appointment.startTime24;
+          sendNotification(session.user.id, {
+            icon: 'notifications-outline',
+            title: 'Your Appointment Is Coming Up',
+            description: `Your appointment with ${facultyName} starts at ${timeLabel}. The queue is now open — your appointment is on the way.`,
+          });
+          sendNotification(bookedFacultyId, {
+            icon: 'notifications-outline',
+            title: 'Upcoming Appointment',
+            description: `${studentProfile.name}'s appointment starts at ${timeLabel}. The queue is now open — the appointment is on the way.`,
+          });
+        }
+
+        joiningQueueRef.current = false;
+      });
+  }, [userRole, session, todaysStudentQueueAppointment, studentQueueWindowActive, studentProfile.name]);
 
   // The faculty member's list of student appointments shown in the
   // Directory tab — loaded from the real `appointments` table further
@@ -1413,7 +1477,7 @@ function AppContent() {
     startingQueueEntryRef.current = front.id;
     supabase
       .from('queue_entries')
-      .update({ started_at: new Date().toISOString() })
+      .update({ started_at: getAppointmentStartDate(frontAppointment.dateKey, frontAppointment.startTime24).toISOString() })
       .eq('id', front.id)
       .is('started_at', null)
       .then(({ error }) => {
@@ -1443,29 +1507,29 @@ function AppContent() {
 
 
   // Faculty is the authoritative reconciler for the scheduled queue.
-  // Every appointment enters the queue exactly one hour before its booked
-  // start time. This means a 9:00 AM appointment becomes a queue item at
-  // 8:00 AM, while a 10:00 AM appointment joins at 9:00 AM.
-  //
-  // When the first appointment reaches 9:00 AM, the separate start effect
-  // marks it as started. If the faculty presses Done early, that handler
-  // immediately starts the next already-queued appointment, so the next
-  // student can begin before their original scheduled time.
+  // An approved appointment enters the queue exactly one hour before its
+  // scheduled start time in Philippine Standard Time. It is still not
+  // marked as started until the actual appointment start time.
   const facultyQueueReminderRef = useRef<Set<string>>(new Set());
   const facultyQueueSyncRef = useRef(false);
   useEffect(() => {
     if (userRole !== 'faculty' || !session || facultyAppointments.length === 0) return;
     if (facultyQueueSyncRef.current) return;
-    const today = toDateKey(nowTick);
+    const today = getPhilippineDateKey(nowTick);
     const eligible = facultyAppointments.filter((appointment) => {
       if (
         appointment.status !== 'upcoming' ||
         appointment.dateKey !== today ||
         !appointment.startTime24 ||
-        appointment.studentApprovalStatus !== 'approved' ||
-        appointment.facultyApprovalStatus !== 'approved'
+        !appointment.endTime24
       ) return false;
-      return hasQueueOpened(appointment.dateKey, appointment.startTime24, nowTick);
+      if ((appointment.facultyApprovalStatus ?? 'approved') !== 'approved') return false;
+      return isQueueWindowActive(
+        appointment.dateKey,
+        appointment.startTime24,
+        appointment.endTime24,
+        nowTick
+      );
     });
     if (eligible.length === 0) return;
 
@@ -1514,13 +1578,13 @@ function AppContent() {
             sendNotification(session.user.id, {
               icon: 'notifications-outline',
               title: 'Upcoming Appointment',
-              description: `${appointment.studentName}'s appointment is coming up at ${timeLabel}. The queue is now open.`,
+              description: `${appointment.studentName}'s appointment starts at ${timeLabel}. The queue is now open — the appointment is on the way.`,
             });
             if (appointment.studentUserId) {
               sendNotification(appointment.studentUserId, {
                 icon: 'notifications-outline',
                 title: 'Your Appointment Is Coming Up',
-                description: `Your appointment with ${facultyProfile.name} starts at ${timeLabel}. Please get ready — your queue is now open.`,
+                description: `Your appointment with ${facultyProfile.name} starts at ${timeLabel}. The queue is now open — your appointment is on the way.`,
               });
             }
           }
@@ -1551,7 +1615,7 @@ function AppContent() {
       supabase
         .from('appointments')
         .select(
-          `id, student_id, date, start_time, end_time, category, mode, location, status, student_approval_status, faculty_approval_status, meeting_link, reference_no,
+          `id, student_id, date, start_time, end_time, category, purpose, mode, location, status, meeting_link, reference_no, student_approval_status, faculty_approval_status,
            students ( student_id, department, year_level, profiles ( full_name, email, avatar_url ) )`
         )
         .eq('faculty_id', facultyId)
@@ -1590,20 +1654,33 @@ function AppContent() {
   // Today's upcoming appointments (sorted), used for FacultyHomeScreen's
   // "Today's Overview" stat and "Today's Schedule" list.
   const todaysFacultyAppointments = facultyAppointments
-    .filter(
-      (a) =>
-        a.status === 'upcoming' &&
-        a.dateKey === toDateKey(nowTick) &&
-        a.studentApprovalStatus === 'approved' &&
-        a.facultyApprovalStatus === 'approved'
-    )
+    .filter((a) => a.status === 'upcoming' && a.dateKey === toDateKey(nowTick))
     .sort((a, b) => (a.startTime24 ?? '').localeCompare(b.startTime24 ?? ''));
+
+  const todaysFacultyQueueAppointment =
+    todaysFacultyAppointments.find(
+      (a) =>
+        !!a.startTime24 &&
+        !!a.endTime24 &&
+        (a.facultyApprovalStatus ?? 'approved') === 'approved' &&
+        isQueueWindowActive(a.dateKey, a.startTime24, a.endTime24, nowTick)
+    ) ?? null;
+
+  const facultyQueueWindowActive = !!todaysFacultyQueueAppointment;
+  const facultyQueueStartsInSeconds = todaysFacultyQueueAppointment
+    ? getSecondsUntilAppointment(
+        todaysFacultyQueueAppointment.dateKey,
+        todaysFacultyQueueAppointment.startTime24,
+        nowTick
+      )
+    : 0;
 
   const todaysFacultySchedule: ScheduleItem[] = todaysFacultyAppointments.map((a) => ({
     id: a.id,
     time: a.startTimeLabel ?? a.time,
     studentName: a.studentName,
     category: a.category,
+    purpose: a.purpose,
     mode: a.mode,
     photoUri: a.photoUri,
   }));
@@ -2133,6 +2210,130 @@ function AppContent() {
     if (error) showToast('Could not update notification.');
   };
 
+  // --- Faculty appointment approval ---
+  // Students submit the request; they never approve their own appointment.
+  // The faculty member is the only person who can approve or decline it.
+  const handleFacultyApprove = async (appointment: StudentAppointment) => {
+    if (!session || userRole !== 'faculty' || actionInFlightRef.current) return;
+    if (appointment.facultyApprovalStatus !== 'pending') {
+      showToast('This appointment is no longer awaiting faculty approval.');
+      return;
+    }
+
+    actionInFlightRef.current = true;
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          student_approval_status: 'approved',
+          faculty_approval_status: 'approved',
+          status: 'upcoming',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', appointment.id)
+        .eq('faculty_id', session.user.id)
+        .eq('faculty_approval_status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        showToast('Could not approve appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        showToast('This appointment was already processed or is no longer available.');
+        return;
+      }
+
+      // The appointment is now eligible for the one-hour queue window.
+      await supabase.from('queue_entries').delete().eq('appointment_id', appointment.id);
+
+      if (appointment.studentUserId) {
+        sendNotification(appointment.studentUserId, {
+          icon: 'checkmark-circle-outline',
+          title: 'Appointment Approved',
+          description: `${facultyProfile.name} approved your appointment on ${appointment.date} at ${appointment.time}.`,
+        });
+      }
+
+      setFacultyAppointments((prev) =>
+        prev.map((a) =>
+          a.id === appointment.id
+            ? { ...a, studentApprovalStatus: 'approved', facultyApprovalStatus: 'approved', status: 'upcoming' }
+            : a
+        )
+      );
+      showToast('Appointment approved.');
+    } finally {
+      actionInFlightRef.current = false;
+    }
+  };
+
+  const handleFacultyDecline = async (appointment: StudentAppointment) => {
+    if (!session || userRole !== 'faculty' || actionInFlightRef.current) return;
+    if (appointment.facultyApprovalStatus !== 'pending') {
+      showToast('This appointment is no longer awaiting faculty approval.');
+      return;
+    }
+
+    actionInFlightRef.current = true;
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          student_approval_status: 'approved',
+          faculty_approval_status: 'declined',
+          status: 'canceled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', appointment.id)
+        .eq('faculty_id', session.user.id)
+        .eq('faculty_approval_status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        showToast('Could not decline appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        showToast('This appointment was already processed or is no longer available.');
+        return;
+      }
+
+      const { error: bookingError } = await supabase
+        .from('slot_bookings')
+        .delete()
+        .eq('appointment_id', appointment.id);
+      if (bookingError) console.log('Failed to release declined slot:', bookingError.message);
+
+      const { error: queueError } = await supabase
+        .from('queue_entries')
+        .delete()
+        .eq('appointment_id', appointment.id);
+      if (queueError) console.log('Failed to remove declined queue entry:', queueError.message);
+
+      if (appointment.studentUserId) {
+        sendNotification(appointment.studentUserId, {
+          icon: 'close-circle-outline',
+          title: 'Appointment Declined',
+          description: `${facultyProfile.name} declined your appointment on ${appointment.date} at ${appointment.time}.`,
+        });
+      }
+
+      setFacultyAppointments((prev) =>
+        prev.map((a) =>
+          a.id === appointment.id
+            ? { ...a, studentApprovalStatus: 'approved', facultyApprovalStatus: 'declined', status: 'cancelled' }
+            : a
+        )
+      );
+      showToast('Appointment declined.');
+    } finally {
+      actionInFlightRef.current = false;
+    }
+  };
+
   // --- Cancellation ---
   // Faculty cancels a student's appointment. This used to update local state
   // and notify the student but never touched the database, so the
@@ -2174,13 +2375,6 @@ function AppContent() {
           icon: 'close-circle-outline',
           title: 'Appointment Cancelled',
           description: `${facultyProfile.name} cancelled your appointment on ${appt.date} at ${appt.time}. Reason: ${reason}`,
-        });
-      }
-      if (session) {
-        sendNotification(session.user.id, {
-          icon: 'close-circle-outline',
-          title: 'Appointment Cancelled',
-          description: `You cancelled ${appt.studentName}'s appointment on ${appt.date} at ${appt.time}.`,
         });
       }
 
@@ -2250,13 +2444,6 @@ function AppContent() {
           icon: 'close-circle-outline',
           title: 'Appointment Cancelled',
           description: `${studentProfile.name} cancelled their appointment on ${dateLabel} at ${timeLabel}.`,
-        });
-      }
-      if (session) {
-        sendNotification(session.user.id, {
-          icon: 'close-circle-outline',
-          title: 'Appointment Cancelled',
-          description: `Your appointment with ${appt.doctorName} on ${dateLabel} at ${timeLabel} was cancelled.`,
         });
       }
 
@@ -2412,13 +2599,6 @@ function AppContent() {
           description: `${studentProfile.name} moved their appointment to ${selection.dateLabel} at ${bookedTimeRangeLabel}.`,
         });
       }
-      if (session) {
-        sendNotification(session.user.id, {
-          icon: 'calendar-outline',
-          title: 'Appointment Rescheduled',
-          description: `Your appointment with ${appt.doctorName} was moved to ${selection.dateLabel} at ${bookedTimeRangeLabel}.`,
-        });
-      }
 
       if (confirmedBooking?.bookingId === appt.id) {
         setConfirmedBooking({
@@ -2570,13 +2750,6 @@ function AppContent() {
             : `Your appointment with ${facultyProfile.name} was rescheduled to ${data.dateLabel} at ${bookedTimeRangeLabel}. Reason: ${data.reason}.`,
         });
       }
-      if (session) {
-        sendNotification(session.user.id, {
-          icon: 'calendar-outline',
-          title: 'Appointment Rescheduled',
-          description: `You rescheduled ${appt.studentName}'s appointment to ${data.dateLabel} at ${bookedTimeRangeLabel}.`,
-        });
-      }
 
       setFacultyActionResult({
         type: 'rescheduled',
@@ -2617,12 +2790,95 @@ function AppContent() {
 
   const queueFaculty = facultyDirectory.find((f) => f.id === queueFacultyId);
 
+  // After supabase.auth.signUp: decides whether the user must verify their
+  // email. Returns true when it handled navigation (verify screen or an
+  // error) so the caller should stop.
+  const routeToEmailVerification = async (
+    signUpData: { user: { identities?: unknown[] | null } | null; session: Session | null },
+    rawEmail: string
+  ): Promise<boolean> => {
+    // "Confirm email" is OFF on the server: Supabase signed them straight
+    // in, so nothing was verified. Undo it and tell the developer.
+    if (signUpData.session) {
+      await supabase.auth.signOut();
+      setAuthError(
+        'Email verification is not enabled on the server. Turn on "Confirm email" in Supabase → Authentication → Providers → Email.'
+      );
+      return true;
+    }
+    // For an email that is already registered AND verified, Supabase
+    // returns a fake user with no identities instead of an error.
+    if (signUpData.user && signUpData.user.identities?.length === 0) {
+      const message = 'An account with this email already exists. Try logging in instead.';
+      setAuthError(message);
+      showToast(message);
+      return true;
+    }
+    setPendingVerifyEmail(rawEmail.trim());
+    setAuthError(null);
+    showToast('We sent a verification code to your email.');
+    setScreen('verifyEmail');
+    return true;
+  };
+
+  // Checks the 6-digit code. On success Supabase confirms the email and
+  // returns a session, so the user lands straight in the app.
+  const handleVerifyEmailCode = async (code: string): Promise<boolean> => {
+    if (authSubmitting) return false;
+    setAuthError(null);
+    setAuthSubmitting(true);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: pendingVerifyEmail,
+        token: code.trim(),
+        type: 'signup',
+      });
+      if (error || !data.user) {
+        const raw = error?.message ?? '';
+        setAuthError(
+          /expired|invalid/i.test(raw)
+            ? 'That code is incorrect or has expired. Request a new one and try again.'
+            : raw || 'Could not verify your email. Please try again.'
+        );
+        return false;
+      }
+      const loadedRole = await loadProfileForUser(data.user.id);
+      if (!loadedRole) {
+        await supabase.auth.signOut();
+        return false;
+      }
+      setPendingVerifyEmail('');
+      showToast('Email verified — welcome to AppointPro!');
+      setScreen(loadedRole === 'faculty' ? 'facultyHome' : 'home');
+      return true;
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleResendVerificationCode = async (): Promise<boolean> => {
+    setAuthError(null);
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: pendingVerifyEmail,
+    });
+    if (error) {
+      setAuthError(error.message);
+      showToast(error.message);
+      return false;
+    }
+    showToast('A new code is on its way.');
+    return true;
+  };
+
   const isAuthScreen =
     screen === 'login' ||
     screen === 'forgotPassword' ||
+    screen === 'resetPassword' ||
     screen === 'accountType' ||
     screen === 'studentSignUp' ||
-    screen === 'facultySignUp';
+    screen === 'facultySignUp' ||
+    screen === 'verifyEmail';
 
   if (authLoading) {
     return (
@@ -2660,6 +2916,23 @@ function AppContent() {
                   password,
                 });
                 if (error) {
+                  if (error.code === 'email_not_confirmed' || /not confirmed/i.test(error.message)) {
+                    // Account exists but the email was never verified:
+                    // send a fresh code and continue on the verify screen.
+                    const { error: resendError } = await supabase.auth.resend({
+                      type: 'signup',
+                      email,
+                    });
+                    setPendingVerifyEmail(email);
+                    setAuthError(null);
+                    showToast(
+                      resendError
+                        ? 'Please verify your email — use the code we already sent you.'
+                        : 'Please verify your email first — we sent you a new code.'
+                    );
+                    setScreen('verifyEmail');
+                    return;
+                  }
                   setAuthError(error.message);
                   showToast(error.message);
                   return;
@@ -2685,11 +2958,33 @@ function AppContent() {
             onBack={() => setScreen('login')}
             onBackToLogin={() => setScreen('login')}
             onSendResetLink={async (email) => {
-              const { error } = await supabase.auth.resetPasswordForEmail(email);
+              const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: Linking.createURL('reset-password'),
+              });
               if (error) {
                 showToast(error.message);
                 return false;
               }
+              return true;
+            }}
+          />
+        )}
+
+        {screen === 'resetPassword' && (
+          <ResetPasswordScreen
+            onCancel={async () => {
+              await supabase.auth.signOut();
+              setScreen('login');
+            }}
+            onSave={async (newPassword) => {
+              const { error } = await supabase.auth.updateUser({ password: newPassword });
+              if (error) {
+                showToast(error.message);
+                return false;
+              }
+              await supabase.auth.signOut();
+              showToast('Password updated. Please log in with your new password.');
+              setScreen('login');
               return true;
             }}
           />
@@ -2755,12 +3050,7 @@ function AppContent() {
                   showToast(error.message);
                   return;
                 }
-                if (!signUpData.session) {
-                  // Email confirmation is required before they're signed in.
-                  showToast('Account created — check your email to confirm before logging in.');
-                  setScreen('login');
-                  return;
-                }
+                if (await routeToEmailVerification(signUpData, data.email)) return;
                 await loadProfileForUser(signUpData.user!.id);
                 setScreen('home');
               } finally {
@@ -2819,17 +3109,32 @@ function AppContent() {
                   showToast(error.message);
                   return;
                 }
-                if (!signUpData.session) {
-                  showToast('Account created — check your email to confirm before logging in.');
-                  setScreen('login');
-                  return;
-                }
+                if (await routeToEmailVerification(signUpData, data.email)) return;
                 await loadProfileForUser(signUpData.user!.id);
                 setScreen('facultyHome');
               } finally {
                 setAuthSubmitting(false);
               }
             }}
+          />
+        )}
+
+        {screen === 'verifyEmail' && (
+          <VerifyEmailScreen
+            email={pendingVerifyEmail}
+            errorMessage={authError}
+            submitting={authSubmitting}
+            onBack={() => {
+              setAuthError(null);
+              setScreen('login');
+            }}
+            onChangeEmail={() => {
+              setAuthError(null);
+              setPendingVerifyEmail('');
+              setScreen('accountType');
+            }}
+            onVerify={handleVerifyEmailCode}
+            onResend={handleResendVerificationCode}
           />
         )}
 
@@ -2854,8 +3159,9 @@ function AppContent() {
             queue={queue}
             currentQueueId={currentStudentQueueId}
             now={nowTick}
-            averageWaitMinutes={AVERAGE_WAIT_MINUTES_PER_STUDENT}
-            showQueueCard={hasAppointmentStarted || todaysApptQueueOpen || (confirmedBooking?.dateKey === toDateKey(nowTick) && !!confirmedBooking?.bookedTimeRangeLabel && hasQueueOpened(confirmedBooking.dateKey, labelTo24h(confirmedBooking.bookedTimeRangeLabel.split('-')[0]?.trim() || '12:00 AM'), nowTick))}
+            showQueueCard={studentQueueWindowActive}
+            queueStartsInSeconds={studentQueueStartsInSeconds}
+            queueAppointmentTime={todaysStudentQueueAppointment?.date.split(' · ')[1]}
             onTabChange={handleTabChange}
           />
         )}
@@ -2880,6 +3186,7 @@ function AppContent() {
             facultyDepartment={selectedFaculty?.department}
             facultyRole={selectedFaculty?.role}
             facultyStatus={selectedFaculty?.status}
+            facultyPhotoUri={selectedFaculty?.photoUri}
             consultationTypes={selectedFaculty?.consultationTypes}
             loading={scheduleLoading}
             onBack={() => setScreen('directory')}
@@ -2991,6 +3298,11 @@ function AppContent() {
                   purpose: selection.purpose,
                   mode: selection.slot.mode,
                   location: selection.slot.location,
+                  // The student is the requester, so their side is
+                  // automatically approved. Only the faculty member needs
+                  // to approve or decline the booking request.
+                  student_approval_status: 'approved',
+                  faculty_approval_status: 'pending',
                 })
                 .select()
                 .single();
@@ -3014,11 +3326,6 @@ function AppContent() {
                 icon: 'calendar-outline',
                 title: 'New Appointment',
                 description: `${studentProfile.name} booked an appointment on ${dayInfo?.fullLabel ?? realDateKey} at ${bookedTimeRangeLabel}.`,
-              });
-              sendNotification(session.user.id, {
-                icon: 'calendar-outline',
-                title: 'Appointment Request Sent',
-                description: `Your appointment request with ${selectedFaculty.name} was sent for ${dayInfo?.fullLabel ?? realDateKey} at ${bookedTimeRangeLabel}.`,
               });
 
               setScheduleByDate(updated);
@@ -3125,6 +3432,7 @@ function AppContent() {
             date={selectedAppointment?.date.split(' · ')[0]}
             time={selectedAppointment?.date.split(' · ')[1]}
             category={selectedAppointment?.category}
+            purpose={selectedAppointment?.purpose}
             location={selectedAppointment?.location}
             mode={selectedAppointment?.mode}
             referenceNo={selectedAppointment?.referenceNo}
@@ -3187,6 +3495,10 @@ function AppContent() {
             pendingReschedulesCount={0}
             schedule={todaysFacultySchedule}
             walkInQueueCount={queue.length}
+            queueWindowActive={facultyQueueWindowActive}
+            queueStartsInSeconds={facultyQueueStartsInSeconds}
+            queueAppointmentTime={todaysFacultyQueueAppointment?.startTimeLabel}
+            queueStudentName={todaysFacultyQueueAppointment?.studentName}
             onMenuPress={() => openSideMenu('faculty')}
             onNotificationsPress={() => setScreen('facultyNotifications')}
             unreadCount={unreadNotificationCount}
@@ -3215,6 +3527,8 @@ function AppContent() {
               setFacultyActionAppointment(appointment);
               setScreen('facultyCancelAppointment');
             }}
+            onApprovePress={handleFacultyApprove}
+            onDeclinePress={handleFacultyDecline}
             onTabChange={handleFacultyTabChange}
           />
         )}
@@ -3421,6 +3735,11 @@ function AppContent() {
               userRole === 'faculty'
                 ? facultyProfile.department
                 : queueFaculty?.department ?? todaysStudentAppointment?.department
+            }
+            doctorPhotoUri={
+              userRole === 'faculty'
+                ? facultyProfile.photoUri
+                : queueFaculty?.photoUri ?? todaysStudentAppointment?.facultyAvatarUrl
             }
             appointmentMode={todaysStudentAppointment?.mode}
             appointmentLocation={todaysStudentAppointment?.location}

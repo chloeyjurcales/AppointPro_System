@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   FlatList,
   Image,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ export type StudentAppointment = {
   date: string;
   time: string;
   category: string;
+  purpose?: string;
   room?: string;
   mode: ConsultationMode;
   meetingLink?: string;
@@ -120,6 +122,7 @@ export type DbFacultyAppointment = {
   start_time: string; // 'HH:MM:SS'
   end_time: string;
   category: string | null;
+  purpose: string | null;
   mode: 'Face-to-Face' | 'Online';
   location: string;
   status: 'upcoming' | 'completed' | 'canceled';
@@ -168,6 +171,7 @@ export function mapDbFacultyAppointment(row: DbFacultyAppointment): StudentAppoi
     date: formatFacultyApptDate(row.date),
     time: `${formatFacultyApptTime12h(row.start_time)} - ${formatFacultyApptTime12h(row.end_time)}`,
     category: row.category ?? 'Consultation',
+    purpose: row.purpose ?? undefined,
     room: isOnline ? undefined : row.location,
     mode: isOnline ? 'online' : 'face-to-face',
     // Online bookings made by students store the link/platform in
@@ -204,6 +208,8 @@ type FacultyDirectoryScreenProps = {
   onSelectAppointment?: (appointment: StudentAppointment) => void;
   onReschedulePress?: (appointment: StudentAppointment) => void;
   onCancelPress?: (appointment: StudentAppointment) => void;
+  onApprovePress?: (appointment: StudentAppointment) => void;
+  onDeclinePress?: (appointment: StudentAppointment) => void;
   onTabChange?: (tab: FacultyTabKey) => void;
 };
 
@@ -212,6 +218,8 @@ export default function FacultyDirectoryScreen({
   onSelectAppointment,
   onReschedulePress,
   onCancelPress,
+  onApprovePress,
+  onDeclinePress,
   onTabChange,
 }: FacultyDirectoryScreenProps) {
   const [activeFilter, setActiveFilter] = useState<AppointmentStatus>('upcoming');
@@ -219,10 +227,15 @@ export default function FacultyDirectoryScreen({
   const source = appointments ?? DEFAULT_APPOINTMENTS;
 
   const isFullyApproved = (appointment: StudentAppointment) =>
-    (appointment.studentApprovalStatus ?? 'approved') === 'approved' &&
     (appointment.facultyApprovalStatus ?? 'approved') === 'approved';
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const normRef = (v?: string) => (v ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const query = normRef(searchQuery);
+
   const filtered = source.filter((appointment) => {
+    // While searching, match by reference number across every tab.
+    if (query) return normRef(appointment.referenceNo).includes(query);
     if (activeFilter === 'upcoming') {
       return appointment.status === 'upcoming' && isFullyApproved(appointment);
     }
@@ -236,6 +249,24 @@ export default function FacultyDirectoryScreen({
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Directory</Text>
+      </View>
+
+      <View style={styles.searchBar}>
+        <Feather name="search" size={16} color={colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by reference number (e.g. APP-2026-000791)"
+          placeholderTextColor="#9B9B9B"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="characters"
+          autoCorrect={false}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Feather name="x-circle" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.filterRow}>
@@ -283,7 +314,7 @@ export default function FacultyDirectoryScreen({
                 <Text style={styles.detailText}>
                   {item.date}, {item.time}
                 </Text>
-                <Text style={styles.detailText}>{item.category}</Text>
+                <Text style={styles.detailText}>{item.purpose || item.category}</Text>
                 <Text style={styles.detailText}>
                   {item.mode === 'online'
                     ? 'Online'
@@ -294,29 +325,27 @@ export default function FacultyDirectoryScreen({
               </View>
             </View>
 
-            {activeFilter === 'pending' && (
+            {activeFilter === 'pending' && item.facultyApprovalStatus === 'pending' && (
               <View style={styles.approvalStatusWrap}>
-                <View
-                  style={[
-                    styles.approvalBadge,
-                    (item.studentApprovalStatus ?? 'approved') === 'pending'
-                      ? styles.approvalBadgeWaiting
-                      : styles.approvalBadgeReady,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.approvalBadgeText,
-                      (item.studentApprovalStatus ?? 'approved') === 'pending'
-                        ? styles.approvalBadgeWaitingText
-                        : styles.approvalBadgeReadyText,
-                    ]}
-                  >
-                    {(item.studentApprovalStatus ?? 'approved') === 'pending'
-                      ? 'WAITING FOR STUDENT APPROVAL'
-                      : 'READY FOR FACULTY APPROVAL'}
+                <View style={[styles.approvalBadge, styles.approvalBadgeReady]}>
+                  <Text style={[styles.approvalBadgeText, styles.approvalBadgeReadyText]}>
+                    AWAITING FACULTY APPROVAL
                   </Text>
                 </View>
+                <View style={styles.actionsRow}>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => onApprovePress?.(item)}
+                    >
+                      <Text style={styles.actionButtonText}>Approve</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.actionButtonDanger]}
+                      onPress={() => onDeclinePress?.(item)}
+                    >
+                      <Text style={styles.actionButtonDangerText}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
               </View>
             )}
 
@@ -339,7 +368,11 @@ export default function FacultyDirectoryScreen({
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No {activeFilter} appointments.</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery.trim()
+              ? 'No appointment found with that reference number.'
+              : `No ${activeFilter} appointments.`}
+          </Text>
         }
       />
 
@@ -360,6 +393,24 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
+    color: colors.textDark,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  searchInput: {
+    flex: 1,
+    marginHorizontal: 8,
+    fontSize: 13,
     color: colors.textDark,
   },
   filterRow: {

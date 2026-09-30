@@ -8,9 +8,7 @@ import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import {
   QueueEntry,
-  AVERAGE_WAIT_MINUTES_PER_STUDENT,
   getRemainingSeconds,
-  getEstimatedWaitSeconds,
   getScheduledTimeRangeLabel,
   getSecondsUntilAppointment,
   formatCountdown,
@@ -26,6 +24,7 @@ type QueueScreenProps = {
   role?: 'student' | 'faculty';
   doctorName?: string;
   doctorDepartment?: string;
+  doctorPhotoUri?: string;
   // The signed-in student's own appointment mode/location (location holds
   // the meeting link when mode is 'Online') — used only to show a
   // "starting soon" heads-up with a tappable/copyable link once it's close
@@ -52,6 +51,7 @@ export default function QueueScreen({
   role = 'student',
   doctorName = 'Dr. Juan Dela Cruz',
   doctorDepartment,
+  doctorPhotoUri,
   appointmentMode,
   appointmentLocation,
   now = new Date(),
@@ -80,32 +80,34 @@ export default function QueueScreen({
     const url = /^https?:\/\//i.test(meetingLink) ? meetingLink : `https://${meetingLink}`;
     Linking.openURL(url).catch(() => {});
   };
-  // Seconds remaining in your own session (if you're #1) or seconds until
-  // it becomes your turn (if you're further back) — both tick down live.
-  const myCountdownSeconds =
-    position && position > 0
-      ? isNowServing
-        ? queue[0].startedAt !== null
-          ? getRemainingSeconds(queue[0], now)
-          : getSecondsUntilAppointment(
-              queue[0].scheduledDateKey,
-              queue[0].scheduledStartTime24,
-              now
-            )
-        : getEstimatedWaitSeconds(queue, position - 1, now)
+  // The queue has two timing phases: before the appointment starts we count
+  // down to the scheduled start; after it starts we count down the actual
+  // consultation window until the scheduled end.
+  const mySecondsUntilStart =
+    position && position > 0 && currentEntry
+      ? getSecondsUntilAppointment(currentEntry.scheduledDateKey, currentEntry.scheduledStartTime24, now)
       : null;
-
+  const myIsStarted = !!currentEntry &&
+    (currentEntry.startedAt !== null || (mySecondsUntilStart !== null && mySecondsUntilStart <= 0));
+  const myCountdownSeconds =
+    position && position > 0 && currentEntry && isNowServing
+      ? myIsStarted
+        ? getRemainingSeconds(currentEntry, now)
+        : Math.max(mySecondsUntilStart ?? 0, 0)
+      : null;
   const nowServing = queue[0] ?? null;
-  const nowServingCountdownSeconds =
-    nowServing?.startedAt !== null && nowServing
+  const nowServingSecondsUntilStart = nowServing
+    ? getSecondsUntilAppointment(nowServing.scheduledDateKey, nowServing.scheduledStartTime24, now)
+    : null;
+  const nowServingIsStarted = !!nowServing &&
+    (nowServing.startedAt !== null || (nowServingSecondsUntilStart !== null && nowServingSecondsUntilStart <= 0));
+  const nowServingCountdownSeconds = nowServing
+    ? nowServingIsStarted
       ? getRemainingSeconds(nowServing, now)
-      : nowServing
-        ? getSecondsUntilAppointment(
-            nowServing.scheduledDateKey,
-            nowServing.scheduledStartTime24,
-            now
-          )
-        : 0;
+      : Math.max(nowServingSecondsUntilStart ?? 0, 0)
+    : 0;
+  const nowServingIsDone = nowServingIsStarted && nowServingCountdownSeconds <= 0;
+  const myAppointmentIsDone = myIsStarted && (myCountdownSeconds ?? 0) <= 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -133,15 +135,20 @@ export default function QueueScreen({
             <Text style={styles.statLabel}>Waiting</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{AVERAGE_WAIT_MINUTES_PER_STUDENT}</Text>
-            <Text style={styles.statLabel}>Avg. min/student</Text>
+            <Text style={styles.statNumber}>{position ?? '—'}</Text>
+            <Text style={styles.statLabel}>Your Position</Text>
           </View>
         </View>
 
         {!isFaculty && hasAppointment && (
           <View style={styles.instructorCard}>
             <View style={styles.instructorIconWrap}>
-              <Ionicons name="person-circle-outline" size={28} color={colors.primary} />
+              <ProfileAvatar
+                uri={doctorPhotoUri}
+                name={doctorName}
+                size={44}
+                role="faculty"
+              />
             </View>
             <View style={styles.instructorTextWrap}>
               <Text style={styles.instructorLabel}>Appointed With</Text>
@@ -165,18 +172,20 @@ export default function QueueScreen({
                   </Text>
                 )}
                 <Text style={styles.nowServingCountdown}>
-                  {nowServing.startedAt === null
-                    ? `Starts in ${formatCountdown(nowServingCountdownSeconds)}`
-                    : `${formatCountdown(nowServingCountdownSeconds)} remaining`}
+                  {nowServingIsDone
+                    ? 'Appointment Done'
+                    : nowServingIsStarted
+                      ? `Started · ${formatCountdown(nowServingCountdownSeconds)} remaining`
+                      : `Starts in ${formatCountdown(nowServingCountdownSeconds)}`}
                 </Text>
-                {nowServing.startedAt !== null && (
+                {nowServingIsStarted && (
                   <TouchableOpacity
                     style={styles.doneButton}
                     onPress={onCompleteCurrent}
                     activeOpacity={0.85}
                   >
                     <Ionicons name="checkmark-circle-outline" size={16} color={colors.white} />
-                    <Text style={styles.doneButtonText}>Done — Call Next</Text>
+                    <Text style={styles.doneButtonText}>{nowServingIsDone ? 'Complete — Call Next' : 'Done — Call Next'}</Text>
                   </TouchableOpacity>
                 )}
               </>
@@ -197,14 +206,16 @@ export default function QueueScreen({
                 )}
                 <Text style={styles.yourQueueWait}>
                   {isNowServing
-                    ? currentEntry?.startedAt === null
-                      ? `Your appointment starts in ${formatCountdown(myCountdownSeconds ?? 0)}`
-                      : `Your appointment is now — ${formatCountdown(myCountdownSeconds ?? 0)} remaining`
-                    : `Estimated wait: ${formatCountdown(myCountdownSeconds ?? 0)}`}
+                    ? myAppointmentIsDone
+                      ? 'Appointment Done'
+                      : myIsStarted
+                        ? `Started · ${formatCountdown(myCountdownSeconds ?? 0)} remaining`
+                        : `Your appointment starts in ${formatCountdown(myCountdownSeconds ?? 0)}`
+                    : `Scheduled: ${currentEntry ? getScheduledTimeRangeLabel(currentEntry) ?? 'See appointment time' : 'See appointment time'}`}
                 </Text>
 
                 {isNowServing &&
-                  currentEntry?.startedAt === null &&
+                  !myIsStarted &&
                   (myCountdownSeconds ?? Infinity) <= STARTING_SOON_SECONDS && (
                     <View style={styles.startingSoonBox}>
                       <Ionicons name="alert-circle-outline" size={16} color={colors.white} />
@@ -267,11 +278,16 @@ export default function QueueScreen({
             queue.map((entry, index) => {
               const isYou = !isFaculty && entry.id === currentQueueId;
               const isEntryNowServing = index === 0;
+              const rowSecondsUntilStart = isEntryNowServing
+                ? getSecondsUntilAppointment(entry.scheduledDateKey, entry.scheduledStartTime24, now)
+                : null;
+              const rowIsStarted = isEntryNowServing &&
+                (entry.startedAt !== null || (rowSecondsUntilStart !== null && rowSecondsUntilStart <= 0));
               const rowSeconds = isEntryNowServing
-                ? entry.startedAt !== null
+                ? rowIsStarted
                   ? getRemainingSeconds(entry, now)
-                  : getSecondsUntilAppointment(entry.scheduledDateKey, entry.scheduledStartTime24, now)
-                : getEstimatedWaitSeconds(queue, index, now);
+                  : Math.max(rowSecondsUntilStart ?? 0, 0)
+                : null;
               const scheduleLabel = getScheduledTimeRangeLabel(entry);
               return (
                 <View
@@ -286,13 +302,13 @@ export default function QueueScreen({
                   <View style={styles.queuePersonRow}><ProfileAvatar uri={entry.studentAvatarUrl} name={entry.studentName} size={36} role="student" /><View style={styles.queueNameWrap}>
                     <Text style={styles.queueName}>
                       {isYou ? 'You' : entry.studentName}
-                      {isFaculty && isEntryNowServing ? (entry.startedAt !== null ? '  ·  Now Serving' : '  ·  Waiting for Start') : ''}
+                      {isFaculty && isEntryNowServing ? (rowIsStarted ? (rowSeconds !== null && rowSeconds <= 0 ? '  ·  Appointment Done' : '  ·  Now Serving') : '  ·  Waiting for Start') : ''}
                     </Text>
                     {!!scheduleLabel && (
                       <Text style={styles.queueRowSchedule}>{scheduleLabel}</Text>
                     )}
                   </View></View>
-                  <Text style={styles.queueRowTime}>{formatCountdown(rowSeconds)}</Text>
+                  <Text style={styles.queueRowTime}>{isEntryNowServing ? (rowSeconds !== null && rowSeconds <= 0 && rowIsStarted ? 'Done' : rowIsStarted ? `${formatCountdown(rowSeconds ?? 0)} left` : `Starts ${formatCountdown(rowSeconds ?? 0)}`) : (scheduleLabel ?? 'Scheduled')}</Text>
                 </View>
               );
             })

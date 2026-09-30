@@ -20,14 +20,6 @@ export type QueueEntry = {
   scheduledEndTime24: string | null;
 };
 
-// Fallback used only for students with no real duration on record.
-export const AVERAGE_WAIT_MINUTES_PER_STUDENT = 10;
-
-// AppointPro opens the scheduled queue one hour before the first
-// appointment's start time. The appointment itself still starts at its
-// booked start time unless the faculty finishes the previous student early.
-export const QUEUE_OPEN_MINUTES_BEFORE_APPOINTMENT = 60;
-
 function timeToMinutes(time24: string | null | undefined): number | null {
   if (!time24) return null;
   const parts = time24.split(':').map(Number);
@@ -35,23 +27,26 @@ function timeToMinutes(time24: string | null | undefined): number | null {
   return parts[0] * 60 + parts[1];
 }
 
+// Appointment timestamps are stored as date/time values without a timezone.
+// AppointPro treats those values as Philippine Standard Time (Asia/Manila, UTC+8)
+// so start/end comparisons are identical on every device.
+export function getPhilippineDateKey(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === 'year')?.value ?? '';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '';
+  return `${year}-${month}-${day}`;
+}
+
 export function getAppointmentStartDate(dateKey: string, startTime24: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
   const [hour, minute, second = 0] = startTime24.split(':').map(Number);
-  const d = new Date();
-  d.setFullYear(year, month - 1, day);
-  d.setHours(hour, minute, second, 0);
-  return d;
-}
-
-export function getQueueOpenDate(dateKey: string, startTime24: string): Date {
-  const start = getAppointmentStartDate(dateKey, startTime24);
-  return new Date(start.getTime() - QUEUE_OPEN_MINUTES_BEFORE_APPOINTMENT * 60 * 1000);
-}
-
-export function hasQueueOpened(dateKey: string | null | undefined, startTime24: string | null | undefined, now: Date): boolean {
-  if (!dateKey || !startTime24) return false;
-  return now.getTime() >= getQueueOpenDate(dateKey, startTime24).getTime();
+  return new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second, 0));
 }
 
 export function hasAppointmentStartedAt(dateKey: string | null | undefined, startTime24: string | null | undefined, now: Date): boolean {
@@ -59,16 +54,44 @@ export function hasAppointmentStartedAt(dateKey: string | null | undefined, star
   return now.getTime() >= getAppointmentStartDate(dateKey, startTime24).getTime();
 }
 
+export function getAppointmentEndDate(dateKey: string, endTime24: string): Date {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const [hour, minute, second = 0] = endTime24.split(':').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second, 0));
+}
+
+// The queue opens exactly one hour before the booked consultation starts.
+// AppointPro treats appointment date/time values as Philippine Standard Time.
+export function getQueueWindowStartDate(dateKey: string, startTime24: string): Date {
+  return new Date(getAppointmentStartDate(dateKey, startTime24).getTime() - 60 * 60 * 1000);
+}
+
+export function isQueueWindowActive(
+  dateKey: string | null | undefined,
+  startTime24: string | null | undefined,
+  endTime24: string | null | undefined,
+  now: Date
+): boolean {
+  if (!dateKey || !startTime24 || !endTime24) return false;
+  const start = getAppointmentStartDate(dateKey, startTime24).getTime();
+  const queueOpen = start - 60 * 60 * 1000;
+  const end = getAppointmentEndDate(dateKey, endTime24).getTime();
+  return now.getTime() >= queueOpen && now.getTime() <= end;
+}
+
+export function getSecondsUntilQueueWindowStart(
+  dateKey: string | null | undefined,
+  startTime24: string | null | undefined,
+  now: Date
+): number {
+  if (!dateKey || !startTime24) return 0;
+  return Math.max(0, Math.floor((getQueueWindowStartDate(dateKey, startTime24).getTime() - now.getTime()) / 1000));
+}
+
 export function getSecondsUntilAppointment(dateKey: string | null | undefined, startTime24: string | null | undefined, now: Date): number {
   if (!dateKey || !startTime24) return 0;
   return Math.max(0, Math.floor((getAppointmentStartDate(dateKey, startTime24).getTime() - now.getTime()) / 1000));
 }
-
-export function getSecondsUntilQueueOpens(dateKey: string | null | undefined, startTime24: string | null | undefined, now: Date): number {
-  if (!dateKey || !startTime24) return 0;
-  return Math.max(0, Math.floor((getQueueOpenDate(dateKey, startTime24).getTime() - now.getTime()) / 1000));
-}
-
 
 // Shape of a row from the real `queue_entries` table in Supabase, joined
 // with its linked `appointments` row so we know that student's actual
@@ -158,32 +181,24 @@ export function getScheduledTimeRangeLabel(entry: QueueEntry): string | null {
   )}`;
 }
 
-// Seconds left for whoever is currently being served (queue[0]). Once
-// their time is up this returns 0 — it does not go negative or auto-remove
-// them; faculty still presses "Done" to actually advance the queue
-// (covers both finishing early and running over).
+// Seconds left in the current consultation. Before the realtime started_at
+// write arrives, the scheduled end time remains authoritative so the timer
+// can transition cleanly from "Starts in" to the consultation countdown.
 export function getRemainingSeconds(entry: QueueEntry, now: Date): number {
-  if (!entry.startedAt) return entry.durationMinutes * 60;
+  // Before the faculty stamps started_at, use the appointment's exact
+  // scheduled end time. This keeps the countdown tied to the booked
+  // Philippine time even if the realtime update arrives a moment later.
+  if (!entry.startedAt) {
+    if (entry.scheduledDateKey && entry.scheduledEndTime24) {
+      const [year, month, day] = entry.scheduledDateKey.split('-').map(Number);
+      const [hour, minute, second = 0] = entry.scheduledEndTime24.split(':').map(Number);
+      const end = new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second, 0));
+      return Math.max(Math.floor((end.getTime() - now.getTime()) / 1000), 0);
+    }
+    return entry.durationMinutes * 60;
+  }
   const elapsedSeconds = Math.floor((now.getTime() - entry.startedAt) / 1000);
   return Math.max(entry.durationMinutes * 60 - elapsedSeconds, 0);
-}
-
-// Total estimated wait, in seconds, before the entry at `index` gets
-// called: whatever time is left on the person being served now, plus the
-// full reserved duration of everyone else ahead in line.
-export function getEstimatedWaitSeconds(queue: QueueEntry[], index: number, now: Date): number {
-  if (index <= 0 || queue.length === 0) return 0;
-  // If the first person hasn't started yet, everyone behind them waits for
-  // that start time PLUS their whole session (the estimate used to stop at
-  // the start, so #2 was told they'd be called when #1 begins).
-  let total = queue[0].startedAt !== null
-    ? getRemainingSeconds(queue[0], now)
-    : getSecondsUntilAppointment(queue[0].scheduledDateKey, queue[0].scheduledStartTime24, now) +
-      queue[0].durationMinutes * 60;
-  for (let i = 1; i < index; i++) {
-    total += queue[i].durationMinutes * 60;
-  }
-  return total;
 }
 
 export function formatCountdown(totalSeconds: number): string {

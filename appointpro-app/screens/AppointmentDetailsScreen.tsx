@@ -17,14 +17,13 @@ type AppointmentDetailsScreenProps = {
   onMorePress?: () => void;
   onReschedule?: () => void;
   onCancelAppointment?: () => void;
-  onApproveStudentRequest?: () => void;
-  onDeclineStudentRequest?: () => void;
   status?: string;
   doctorName?: string;
   department?: string;
   date?: string;
   time?: string;
   category?: string;
+  purpose?: string;
   location?: string;
   mode?: string;
   referenceNo?: string;
@@ -34,8 +33,6 @@ type AppointmentDetailsScreenProps = {
   dateKey?: string;
   startTime24?: string;
   endTime24?: string;
-  studentApprovalStatus?: 'pending' | 'approved' | 'declined';
-  facultyApprovalStatus?: 'pending' | 'approved' | 'declined';
 };
 
 export default function AppointmentDetailsScreen({
@@ -43,14 +40,13 @@ export default function AppointmentDetailsScreen({
   onMorePress,
   onReschedule,
   onCancelAppointment,
-  onApproveStudentRequest,
-  onDeclineStudentRequest,
   status = 'UPCOMING',
   doctorName = 'Dr. Juan Dela Cruz',
   department = 'Computer Studies',
   date = 'May 13, 2026 (Tue)',
   time = '10:00 AM',
-  category = 'Academic Advising',
+  category = 'Consultation',
+  purpose = '',
   location = 'Room 305, CHMC Main Campus',
   mode = 'Face-to-Face',
   referenceNo = 'APP-2026-000791',
@@ -58,8 +54,6 @@ export default function AppointmentDetailsScreen({
   dateKey,
   startTime24,
   endTime24,
-  studentApprovalStatus = 'approved',
-  facultyApprovalStatus = 'approved',
 }: AppointmentDetailsScreenProps) {
   const isOnline = mode.trim().toLowerCase() === 'online';
 
@@ -86,24 +80,6 @@ export default function AppointmentDetailsScreen({
           <Text style={styles.statusBadgeText}>{status}</Text>
         </View>
 
-        {studentApprovalStatus === 'pending' && (
-          <View style={styles.approvalNotice}>
-            <Text style={styles.approvalNoticeTitle}>Student Approval Required</Text>
-            <Text style={styles.approvalNoticeText}>
-              Review this appointment request. Approve it before the faculty can give the final approval.
-            </Text>
-          </View>
-        )}
-
-        {studentApprovalStatus === 'approved' && facultyApprovalStatus === 'pending' && (
-          <View style={styles.approvalNotice}>
-            <Text style={styles.approvalNoticeTitle}>Waiting for Faculty Approval</Text>
-            <Text style={styles.approvalNoticeText}>
-              You approved this request. The appointment is now waiting for the faculty's final approval.
-            </Text>
-          </View>
-        )}
-
         <View style={styles.detailsCard}>
           <View style={styles.doctorRow}>
             <ProfileAvatar uri={photoUri} name={doctorName} size={44} role="faculty" />
@@ -125,7 +101,7 @@ export default function AppointmentDetailsScreen({
           </View>
           <View style={styles.detailRow}>
             <Ionicons name="school-outline" size={16} color={colors.primary} style={styles.detailIcon} />
-            <Text style={styles.detailText}>{category}</Text>
+            <Text style={styles.detailText}>{purpose || category}</Text>
           </View>
           <View style={styles.detailRow}>
             <Ionicons
@@ -153,8 +129,6 @@ export default function AppointmentDetailsScreen({
             <Text style={styles.detailText}>{mode}</Text>
           </View>
 
-          <View style={styles.detailsDivider} />
-
           <View style={styles.detailRow}>
             <MaterialCommunityIcons
               name="receipt-text-outline"
@@ -170,24 +144,7 @@ export default function AppointmentDetailsScreen({
         </View>
       </ScrollView>
 
-      {studentApprovalStatus === 'pending' ? (
-        <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={onDeclineStudentRequest}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.secondaryButtonText}>Decline</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={onApproveStudentRequest}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.primaryButtonText}>Approve Request</Text>
-          </TouchableOpacity>
-        </View>
-      ) : status.trim().toUpperCase() === 'UPCOMING' && (
+      {status.trim().toUpperCase() === 'UPCOMING' && (
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.secondaryButton}
@@ -313,37 +270,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     gap: spacing.sm,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  approvalNotice: {
-    backgroundColor: '#FFF8E1',
-    borderWidth: 1,
-    borderColor: '#F2D27A',
-    borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  approvalNoticeTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textDark,
-    marginBottom: 4,
-  },
-  approvalNoticeText: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: colors.textMuted,
   },
   secondaryButton: {
     borderWidth: 1,

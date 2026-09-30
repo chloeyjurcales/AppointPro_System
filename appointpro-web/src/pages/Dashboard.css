@@ -821,3 +821,18 @@
     padding: 16px 16px 32px;
   }
 }
+/* The upper-right avatar is an interactive shortcut to the signed-in
+   faculty member's profile. Keep the existing avatar appearance. */
+.db-avatar-button {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+.db-avatar-button:focus-visible {
+  outline: 2px solid var(--brand-500, #7a0e2c);
+  outline-offset: 3px;
+}

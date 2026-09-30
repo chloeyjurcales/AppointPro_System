@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -21,6 +22,7 @@ export type Appointment = {
   doctorName: string;
   date: string;
   category: string;
+  purpose?: string;
   location: string;
   mode: string;
   department?: string;
@@ -85,12 +87,13 @@ export type DbStudentAppointment = {
   start_time: string; // 'HH:MM:SS'
   end_time: string;
   category: string | null;
+  purpose: string | null;
   mode: 'Face-to-Face' | 'Online';
   location: string;
   status: 'upcoming' | 'completed' | 'canceled';
+  student_approval_status?: 'pending' | 'approved' | 'declined' | null;
+  faculty_approval_status?: 'pending' | 'approved' | 'declined' | null;
   reference_no: string;
-  student_approval_status: 'pending' | 'approved' | 'declined';
-  faculty_approval_status: 'pending' | 'approved' | 'declined';
   faculty: {
     department: string | null;
     profiles: { full_name: string; avatar_url?: string | null } | { full_name: string; avatar_url?: string | null }[] | null;
@@ -125,6 +128,7 @@ export function mapDbStudentAppointment(row: DbStudentAppointment): Appointment 
     doctorName: facultyProfile?.full_name ?? 'Unknown Faculty',
     date: `${formatStudentApptDate(row.date)} · ${formatStudentApptTime12h(row.start_time)}`,
     category: row.category ?? 'Consultation',
+    purpose: row.purpose ?? undefined,
     // Keep the real value here even for Online appointments — for
     // Online mode this is the faculty member's meeting link, and the
     // Details screen needs it intact to render a working, tappable
@@ -139,8 +143,8 @@ export function mapDbStudentAppointment(row: DbStudentAppointment): Appointment 
     referenceNo: row.reference_no,
     facultyId: row.faculty_id,
     facultyAvatarUrl: facultyProfile?.avatar_url ?? undefined,
-    studentApprovalStatus: row.student_approval_status,
-    facultyApprovalStatus: row.faculty_approval_status,
+    studentApprovalStatus: row.student_approval_status ?? 'approved',
+    facultyApprovalStatus: row.faculty_approval_status ?? 'approved',
   };
 }
 
@@ -195,7 +199,14 @@ export default function AppointmentsScreen({
 }: AppointmentsScreenProps) {
   const [activeFilter, setActiveFilter] = useState<FilterKey>('upcoming');
 
-  const filtered = appointments.filter((a) => matchesFilter(a, activeFilter));
+  const [searchQuery, setSearchQuery] = useState('');
+  const normRef = (v?: string) => (v ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const query = normRef(searchQuery);
+  // While searching, look through ALL of the student's appointments by
+  // reference number (ignoring the status tab).
+  const filtered = query
+    ? appointments.filter((a) => normRef(a.referenceNo).includes(query))
+    : appointments.filter((a) => matchesFilter(a, activeFilter));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -205,6 +216,24 @@ export default function AppointmentsScreen({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Appointments</Text>
         <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.searchBar}>
+        <Ionicons name="search-outline" size={16} color={colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by reference number (e.g. APP-2026-000791)"
+          placeholderTextColor="#9B9B9B"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="characters"
+          autoCorrect={false}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.filterRow}>
@@ -240,22 +269,21 @@ export default function AppointmentsScreen({
               <View style={[styles.statusBadge, { backgroundColor: statusStyle.background }]}>
                 <Text style={styles.statusBadgeText}>{statusStyle.label}</Text>
               </View>
-              {item.status === 'upcoming' && item.studentApprovalStatus === 'pending' && (
-                <View style={styles.pendingBadge}>
-                  <Text style={styles.pendingBadgeText}>AWAITING YOUR APPROVAL</Text>
-                </View>
-              )}
-              {item.status === 'upcoming' && item.studentApprovalStatus === 'approved' && item.facultyApprovalStatus === 'pending' && (
-                <View style={styles.pendingFacultyBadge}>
-                  <Text style={styles.pendingFacultyBadgeText}>AWAITING FACULTY APPROVAL</Text>
-                </View>
-              )}
+              {item.status === 'upcoming' && item.facultyApprovalStatus === 'pending' && (
+                  <Text style={styles.approvalHint}>AWAITING FACULTY APPROVAL</Text>
+                )}
               <View style={styles.cardRow}>
-                <ProfileAvatar uri={item.facultyAvatarUrl} name={item.doctorName} size={44} role="faculty" />
+                <ProfileAvatar
+                  uri={item.facultyAvatarUrl}
+                  name={item.doctorName}
+                  size={44}
+                  role="faculty"
+                  style={styles.avatarSpacing}
+                />
                 <View style={styles.infoWrap}>
                   <Text style={styles.doctorName}>{item.doctorName}</Text>
                   <Text style={styles.detailText}>{item.date}</Text>
-                  <Text style={styles.detailText}>{item.category}</Text>
+                  <Text style={styles.detailText}>{item.purpose || item.category}</Text>
                   <Text style={styles.detailText} numberOfLines={1}>
                     {item.mode === 'Online' ? 'Online' : item.location} · {item.mode}
                   </Text>
@@ -266,7 +294,11 @@ export default function AppointmentsScreen({
           );
         }}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No {activeFilter} appointments.</Text>
+          <Text style={styles.emptyText}>
+            {searchQuery.trim()
+              ? 'No appointment found with that reference number.'
+              : `No ${activeFilter} appointments.`}
+          </Text>
         }
         ListFooterComponent={
           filtered.length > 0 && filtered.length <= 1 ? <EmptySpaceIllustration /> : null
@@ -297,6 +329,24 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 24,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  searchInput: {
+    flex: 1,
+    marginHorizontal: 8,
+    fontSize: 13,
+    color: colors.textDark,
   },
   filterRow: {
     flexDirection: 'row',
@@ -350,32 +400,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
-  pendingBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#FFF3CD',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: spacing.sm,
-  },
-  pendingBadgeText: {
-    color: '#856404',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  pendingFacultyBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#E8F0FF',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: spacing.sm,
-  },
-  pendingFacultyBadgeText: {
-    color: colors.primary,
-    fontSize: 9,
-    fontWeight: '800',
-  },
   cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -387,6 +411,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  avatarSpacing: {
     marginRight: spacing.md,
   },
   infoWrap: {
@@ -426,5 +453,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: colors.white,
+  },
+  approvalHint: {
+    marginTop: 5,
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.primary,
+    letterSpacing: 0.3,
   },
 });

@@ -7,7 +7,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import ProfileAvatar from '../components/ProfileAvatar';
 import { colors, spacing } from '../theme';
 import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import {
@@ -23,6 +24,7 @@ type FacultyProfileScreenProps = {
   facultyDepartment?: string;
   facultyRole?: string;
   facultyStatus?: 'available' | 'unavailable';
+  facultyPhotoUri?: string;
   consultationTypes?: string;
   // True while this faculty's schedule is still being fetched.
   loading?: boolean;
@@ -40,6 +42,7 @@ export default function FacultyProfileScreen({
   facultyDepartment = 'Computer Studies',
   facultyRole = 'Instructor',
   facultyStatus = 'available',
+  facultyPhotoUri, 
   consultationTypes = 'Face-to-Face · Online',
   loading = false,
   onBack,
@@ -86,10 +89,14 @@ export default function FacultyProfileScreen({
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.profileRow}>
-          <View style={styles.avatar}>
-            <FontAwesome5 name="user-tie" size={22} color={colors.white} />
-          </View>
-          <View>
+          <ProfileAvatar
+            uri={facultyPhotoUri}
+            name={facultyName}
+            size={56}
+            role="faculty"
+            style={styles.avatar}
+          />
+          <View style={styles.profileTextWrap}>
             <Text style={styles.name}>{facultyName}</Text>
             <Text style={styles.department}>
               {facultyRole} · {facultyDepartment}
@@ -270,6 +277,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
+  },
+  profileTextWrap: {
+    flex: 1,
   },
   profileRow: {
     flexDirection: 'row',

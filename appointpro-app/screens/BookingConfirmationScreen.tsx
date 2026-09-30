@@ -17,8 +17,9 @@ type BookingConfirmationScreenProps = {
   onMorePress?: () => void;
   onBookAnother?: () => void;
   onBackToHome?: () => void;
-  onApproveRequest?: () => void;
-  onDeclineRequest?: () => void;
+  onApproveAppointment?: () => void;
+  onCancelAppointment?: () => void;
+  approvalPending?: boolean;
   doctorName?: string;
   department?: string;
   date?: string;
@@ -35,7 +36,6 @@ type BookingConfirmationScreenProps = {
   dateKey?: string;
   startTime24?: string;
   endTime24?: string;
-  approvalPending?: boolean;
 };
 
 export default function BookingConfirmationScreen({
@@ -43,8 +43,9 @@ export default function BookingConfirmationScreen({
   onMorePress,
   onBookAnother,
   onBackToHome,
-  onApproveRequest,
-  onDeclineRequest,
+  onApproveAppointment,
+  onCancelAppointment,
+  approvalPending = false,
   doctorName = 'Dr. Juan Dela Cruz',
   department = 'Computer Studies',
   date = 'May 13, 2026 (Tue)',
@@ -59,7 +60,6 @@ export default function BookingConfirmationScreen({
   dateKey,
   startTime24,
   endTime24,
-  approvalPending = true,
 }: BookingConfirmationScreenProps) {
   const isOnline = mode.trim().toLowerCase() === 'online';
 
@@ -82,23 +82,13 @@ export default function BookingConfirmationScreen({
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {approvalPending && (
-          <View style={styles.approvalNotice}>
-            <Text style={styles.approvalTitle}>Appointment Request Created</Text>
-            <Text style={styles.approvalText}>
-              You must approve this request before the faculty can give the final approval.
-            </Text>
-          </View>
-        )}
         <View style={styles.successWrap}>
           <View style={styles.successCircle}>
             <Ionicons name="checkmark" size={36} color={colors.white} />
           </View>
-          <Text style={styles.successTitle}>{approvalPending ? 'Appointment Request Created' : 'Appointment Confirmed!'}</Text>
+          <Text style={styles.successTitle}>Appointment Request Sent</Text>
           <Text style={styles.successSubtitle}>
-            {approvalPending
-              ? 'Your appointment is waiting for your approval.'
-              : 'Your appointment has been successfully booked.'}
+            Your appointment was submitted and is waiting for faculty approval.
           </Text>
         </View>
 
@@ -174,32 +164,36 @@ export default function BookingConfirmationScreen({
         </View>
       </ScrollView>
 
-      {approvalPending && (
-        <View style={styles.approvalFooter}>
-          <TouchableOpacity style={styles.approvalSecondaryButton} onPress={onDeclineRequest}>
-            <Text style={styles.approvalSecondaryButtonText}>Decline</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.approvalPrimaryButton} onPress={onApproveRequest}>
-            <Text style={styles.approvalPrimaryButtonText}>Approve Request</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={onBookAnother}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.primaryButtonText}>Book Appointments</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={onBackToHome}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.secondaryButtonText}>Back to Home</Text>
-        </TouchableOpacity>
+        {approvalPending ? (
+          <>
+            <Text style={styles.approvalFooterText}>The faculty member must approve this request before the appointment is confirmed.</Text>
+            <TouchableOpacity
+              style={styles.dangerButton}
+              onPress={onCancelAppointment}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.dangerButtonText}>Cancel Request</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={onBookAnother}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryButtonText}>Book Appointments</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={onBackToHome}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.secondaryButtonText}>Back to Home</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -330,58 +324,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textDark,
   },
-  approvalNotice: {
-    backgroundColor: '#FFF8E1',
-    borderWidth: 1,
-    borderColor: '#F2D27A',
-    borderRadius: 12,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  approvalTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.textDark,
-    marginBottom: 4,
-  },
-  approvalText: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: colors.textMuted,
-  },
-  approvalFooter: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-  },
-  approvalPrimaryButton: {
-    flex: 1,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approvalPrimaryButtonText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  approvalSecondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: 10,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approvalSecondaryButtonText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '700',
-  },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -411,5 +353,44 @@ const styles = StyleSheet.create({
     color: colors.textDark,
     fontWeight: '700',
     fontSize: 15,
+  },
+  approvalFooterText: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  approvalButtonsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  dangerButton: {
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dangerButtonHalf: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonHalf: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dangerButtonText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

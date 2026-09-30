@@ -428,6 +428,8 @@ type FacultyDirectoryStatus = 'Available' | 'Unavailable';
 type FacultyDirectoryMember = {
   id: string;
   name: string;
+  email: string | null;
+  facultyCode: string | null;
   role: string;
   department: string;
   status: FacultyDirectoryStatus;
@@ -439,10 +441,11 @@ type DbDirectoryRow = {
   profile_id: string;
   department: string | null;
   role_title: string;
+  faculty_id: string | null;
   is_available: boolean;
   profiles:
-    | { full_name: string; avatar_url: string | null }
-    | { full_name: string; avatar_url: string | null }[]
+    | { full_name: string; email: string | null; avatar_url: string | null }
+    | { full_name: string; email: string | null; avatar_url: string | null }[]
     | null;
 };
 
@@ -456,6 +459,7 @@ function DirectoryTab({
   const [members, setMembers] = useState<FacultyDirectoryMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedMember, setSelectedMember] = useState<FacultyDirectoryMember | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -463,7 +467,7 @@ function DirectoryTab({
     const load = () => {
       supabase
         .from('faculty')
-        .select('profile_id, department, role_title, is_available, profiles ( full_name, avatar_url )')
+        .select('profile_id, faculty_id, department, role_title, is_available, profiles ( full_name, email, avatar_url )')
         .then(({ data, error }) => {
           if (!isMounted) return;
           if (error) {
@@ -482,6 +486,8 @@ function DirectoryTab({
                 id: row.profile_id,
                 name: profile?.full_name ?? 'Unnamed Faculty',
                 avatarUrl: profile?.avatar_url ?? null,
+                email: profile?.email ?? null,
+                facultyCode: row.faculty_id ?? null,
                 role: row.role_title,
                 department: row.department ?? '—',
                 status: row.is_available ? 'Available' : 'Unavailable',
@@ -539,9 +545,7 @@ function DirectoryTab({
               key={member.id}
               type="button"
               className="fv-directory-row"
-              onClick={() =>
-                window.alert('Viewing another faculty profile is not built yet.')
-              }
+              onClick={() => setSelectedMember(member)}
             >
               <span className="fv-directory-avatar">
                 {member.avatarUrl ? (
@@ -569,6 +573,66 @@ function DirectoryTab({
               <ChevronRightIcon />
             </button>
           ))}
+        </div>
+      )}
+
+      {selectedMember && (
+        <div
+          className="fv-profile-modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSelectedMember(null);
+          }}
+        >
+          <div
+            className="fv-profile-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fv-profile-modal-title"
+          >
+            <button
+              type="button"
+              className="fv-profile-modal-close"
+              onClick={() => setSelectedMember(null)}
+              aria-label="Close profile"
+            >
+              ×
+            </button>
+
+            <div className="fv-profile-modal-avatar">
+              {selectedMember.avatarUrl ? (
+                <img src={selectedMember.avatarUrl} alt="" />
+              ) : (
+                <UserIcon />
+              )}
+            </div>
+
+            <h3 id="fv-profile-modal-title">{selectedMember.name}</h3>
+            <p className="fv-profile-modal-role">{selectedMember.role}</p>
+
+            <div className="fv-profile-modal-status">
+              <span
+                className={`fv-directory-status fv-directory-status-${selectedMember.status.toLowerCase()}`}
+              >
+                {selectedMember.status}
+              </span>
+            </div>
+
+            <dl className="fv-profile-modal-info">
+              <div>
+                <dt>Department</dt>
+                <dd>{selectedMember.department}</dd>
+              </div>
+              <div>
+                <dt>Faculty ID</dt>
+                <dd>{selectedMember.facultyCode || '—'}</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd>{selectedMember.email || '—'}</dd>
+              </div>
+            </dl>
+          </div>
         </div>
       )}
     </div>

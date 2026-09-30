@@ -17,6 +17,7 @@ type Appointment = {
   status: AppointmentStatus;
   mode: MeetingMode;
   location: string;
+  referenceNo: string;
   // The booking student's real `profiles.id` — needed to notify them
   // when this appointment is cancelled/rescheduled/completed.
   studentUserId: string | undefined;
@@ -35,7 +36,8 @@ type TabId = 'all' | 'upcoming' | 'completed' | 'cancelled';
 type ModalState =
   | { type: 'none' }
   | { type: 'cancel'; appointment: Appointment }
-  | { type: 'reschedule'; appointment: Appointment };
+  | { type: 'reschedule'; appointment: Appointment }
+  | { type: 'details'; appointment: Appointment };
 
 type QueueGroup = {
   blockKey: string;
@@ -122,6 +124,7 @@ type DbAppointment = {
   mode: MeetingMode;
   location: string;
   status: 'upcoming' | 'completed' | 'canceled';
+  reference_no: string | null;
   students: {
     student_id: string;
     department: string | null;
@@ -202,6 +205,7 @@ function mapDbAppointment(row: DbAppointment): Appointment {
 
   return {
     id: row.id,
+    referenceNo: row.reference_no ?? '',
     studentName: profile?.full_name ?? 'Unknown Student',
     studentInfo: buildStudentInfo(
       student?.department,
@@ -278,7 +282,7 @@ export default function AppointmentsView({
         .from('appointments')
         .select(
           `id, student_id, slot_id, date, start_time, end_time, duration_minutes,
-           category, purpose, mode, location, status,
+           category, purpose, mode, location, status, reference_no,
            students ( student_id, department, year_level, profiles ( full_name ) ),
            availability_slots ( start_time, end_time )`,
         )
@@ -319,6 +323,7 @@ export default function AppointmentsView({
     };
   }, [facultyId]);
   const [activeTab, setActiveTab] = useState<TabId>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
 
   const [cancelReason, setCancelReason] = useState('');
@@ -475,12 +480,20 @@ export default function AppointmentsView({
     { id: 'cancelled', label: 'Cancelled', count: counts.cancelled },
   ];
 
-  const filtered =
-    activeTab === 'all'
+  const normRef = (v: string) => v.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const refQuery = normRef(searchQuery);
+  // While searching, look through every appointment by reference number.
+  const filtered = refQuery
+    ? appointments.filter((a) => normRef(a.referenceNo).includes(refQuery))
+    : activeTab === 'all'
       ? appointments
       : appointments.filter((a) => a.status.toLowerCase() === activeTab);
 
   const closeModal = () => setModal({ type: 'none' });
+
+  const openDetails = (appointment: Appointment) => {
+    setModal({ type: 'details', appointment });
+  };
 
   const openCancel = (appointment: Appointment) => {
     setCancelReason('');
@@ -776,6 +789,16 @@ export default function AppointmentsView({
         </div>
       )}
 
+      <div className="av-search">
+        <input
+          type="search"
+          className="av-search-input"
+          placeholder="Search by reference number (e.g. APP-2026-000791)"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
       <div className="av-tabs">
         {tabs.map((tab) => (
           <button
@@ -801,15 +824,45 @@ export default function AppointmentsView({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((appt) => (
-              <tr key={appt.id}>
+            {filtered.map((appt) => {
+              const isHistory =
+                appt.status === 'Completed' || appt.status === 'Cancelled';
+
+              return (
+              <tr
+                key={appt.id}
+                className={isHistory ? 'av-history-row' : undefined}
+                onClick={isHistory ? () => openDetails(appt) : undefined}
+                onKeyDown={
+                  isHistory
+                    ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openDetails(appt);
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={isHistory ? 0 : undefined}
+                role={isHistory ? 'button' : undefined}
+                aria-label={
+                  isHistory
+                    ? `View details for ${appt.studentName}'s ${appt.status.toLowerCase()} appointment`
+                    : undefined
+                }
+              >
                 <td>
                   <div className="av-datetime">
                     <span className="av-date">{appt.date}</span>
                     <span className="av-time">{appt.time}</span>
                   </div>
                 </td>
-                <td className="av-student">{appt.studentName}</td>
+                <td className="av-student">
+                  {appt.studentName}
+                  {appt.referenceNo && (
+                    <div className="av-ref">Ref: {appt.referenceNo}</div>
+                  )}
+                </td>
                 <td className="av-reason">{appt.reason}</td>
                 <td>
                   <span
@@ -843,7 +896,8 @@ export default function AppointmentsView({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
 
             {filtered.length === 0 && (
               <tr>
@@ -853,7 +907,9 @@ export default function AppointmentsView({
                       <CalendarEmptyIcon />
                     </span>
                     <span className="av-empty-title">
-                      No appointments in this category
+                      {refQuery
+                        ? 'No appointment found with that reference number'
+                        : 'No appointments in this category'}
                     </span>
                     <span className="av-empty-subtitle">
                       New bookings will show up here as students schedule
@@ -880,6 +936,89 @@ export default function AppointmentsView({
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
           >
+            {modal.type === 'details' && (
+              <>
+                <div className="av-modal-heading-row">
+                  <div>
+                    <h2>Appointment Details</h2>
+                    <p className="av-modal-heading-subtitle">
+                      {modal.appointment.status} appointment
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="av-modal-close"
+                    aria-label="Close appointment details"
+                    onClick={closeModal}
+                  >
+                    <XSmallIcon />
+                  </button>
+                </div>
+
+                <div className="av-details-status">
+                  <span
+                    className={`av-status av-status-${modal.appointment.status.toLowerCase()}`}
+                  >
+                    {modal.appointment.status}
+                  </span>
+                </div>
+
+                <div className="av-details-grid">
+                  <div className="av-details-item av-details-item-wide">
+                    <span className="av-details-label">Student</span>
+                    <strong>{modal.appointment.studentName}</strong>
+                    {modal.appointment.studentInfo && (
+                      <span className="av-details-value-muted">
+                        {modal.appointment.studentInfo}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="av-details-item">
+                    <span className="av-details-label">Date</span>
+                    <strong>{modal.appointment.date}</strong>
+                  </div>
+
+                  <div className="av-details-item">
+                    <span className="av-details-label">Time</span>
+                    <strong>{modal.appointment.time}</strong>
+                  </div>
+
+                  <div className="av-details-item av-details-item-wide">
+                    <span className="av-details-label">Reason / Purpose</span>
+                    <strong>{modal.appointment.reason}</strong>
+                  </div>
+
+                  <div className="av-details-item">
+                    <span className="av-details-label">Meeting Mode</span>
+                    <strong>{modal.appointment.mode}</strong>
+                  </div>
+
+                  <div className="av-details-item">
+                    <span className="av-details-label">Duration</span>
+                    <strong>{modal.appointment.durationMinutes} minutes</strong>
+                  </div>
+
+                  <div className="av-details-item av-details-item-wide">
+                    <span className="av-details-label">Location / Meeting Link</span>
+                    <strong className="av-details-break">
+                      {modal.appointment.location || 'Not specified'}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="av-modal-actions">
+                  <button
+                    type="button"
+                    className="av-modal-btn av-modal-btn-secondary"
+                    onClick={closeModal}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+
             {modal.type === 'cancel' && (
               <>
                 <h2>Cancel Appointment</h2>

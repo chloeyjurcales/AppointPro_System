@@ -843,3 +843,136 @@
     gap: 0;
   }
 }
+/* ---------- Appointment history details ---------- */
+
+.av-history-row {
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s) var(--ease-standard, ease);
+}
+
+.av-history-row:hover {
+  background: var(--brand-50, #fdf1f4);
+}
+
+.av-history-row:focus-visible {
+  outline: 2px solid var(--brand-400, #b3153a);
+  outline-offset: -2px;
+}
+
+.av-modal-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.av-modal-heading-row h2 {
+  margin-bottom: 2px;
+}
+
+.av-modal-heading-subtitle {
+  margin: 0;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12.5px;
+}
+
+.av-modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  background: var(--surface-card, #ffffff);
+  color: var(--text-secondary, #6b7280);
+  border-radius: var(--radius-sm, 8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.av-modal-close:hover {
+  background: var(--gray-50, #f7f7f8);
+  color: var(--text-primary, #1a1a1a);
+}
+
+.av-details-status {
+  margin-bottom: 16px;
+}
+
+.av-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.av-details-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 13px;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: var(--radius-md, 10px);
+  background: var(--gray-50, #fafafa);
+}
+
+.av-details-item-wide {
+  grid-column: 1 / -1;
+}
+
+.av-details-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-secondary, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+.av-details-item strong {
+  font-size: 13px;
+  color: var(--text-primary, #1a1a1a);
+  line-height: 1.45;
+}
+
+.av-details-value-muted {
+  font-size: 11.5px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.av-details-break {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .av-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .av-details-item-wide {
+    grid-column: auto;
+  }
+}
+
+.av-search {
+  margin: 0 0 12px;
+}
+
+.av-search-input {
+  width: 100%;
+  max-width: 420px;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid #d5d9e2;
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.av-ref {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+}

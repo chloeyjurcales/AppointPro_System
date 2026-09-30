@@ -91,7 +91,13 @@ export default function DirectoryScreen({
             onPress={() => onSelectFaculty?.(item)}
             activeOpacity={0.8}
           >
-            <ProfileAvatar uri={item.photoUri} name={item.name} size={48} role="faculty" />
+            <ProfileAvatar
+              uri={item.photoUri}
+              name={item.name}
+              size={48}
+              role="faculty"
+              style={styles.avatarSpacing}
+            />
             <View style={styles.infoWrap}>
               <Text style={styles.name}>{item.name}</Text>
               <Text style={styles.role}>
@@ -195,6 +201,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  avatarSpacing: {
     marginRight: spacing.md,
   },
   infoWrap: {

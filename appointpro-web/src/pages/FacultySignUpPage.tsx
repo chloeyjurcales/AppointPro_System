@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import './FacultySignUpPage.css';
 
@@ -18,6 +18,11 @@ type FormState = {
   confirmPassword: string;
 };
 
+// Must match "Email OTP Length" in Supabase → Authentication → Providers →
+// Email (default is 6).
+const OTP_LENGTH = 8;
+const RESEND_COOLDOWN_SECONDS = 60;
+
 const initialState: FormState = {
   fullName: '',
   facultyId: '',
@@ -35,8 +40,18 @@ export default function FacultySignUpPage({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  // 'form' = details + password, 'verify' = enter the code emailed to them.
+  const [step, setStep] = useState<'form' | 'verify'>('form');
+  const [code, setCode] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
   const handleChange =
     (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,7 +97,7 @@ export default function FacultySignUpPage({
       // Creates the auth user and stashes the faculty-specific fields as
       // user metadata. Adjust/extend this (e.g. insert into a `faculty`
       // table) to match your actual database schema.
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: form.email.trim(),
         password: form.password,
         options: {
@@ -100,7 +115,65 @@ export default function FacultySignUpPage({
         return;
       }
 
-      setSuccess(true);
+      // "Confirm email" is OFF on the server: Supabase signed them straight
+      // in, so nothing was verified. Undo it and flag the misconfiguration.
+      if (signUpData.session) {
+        await supabase.auth.signOut();
+        setError(
+          'Email verification is not enabled on the server. Turn on "Confirm email" in Supabase → Authentication → Providers → Email.',
+        );
+        return;
+      }
+
+      // Already registered AND verified: Supabase returns a fake user with
+      // no identities instead of an error.
+      if (signUpData.user && signUpData.user.identities?.length === 0) {
+        setError('An account with this email already exists. Try logging in instead.');
+        return;
+      }
+
+      setCode('');
+      setNotice(null);
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setStep('verify');
+    } catch (err) {
+      setError('Something went wrong. Please try again.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setNotice(null);
+
+    if (code.length !== OTP_LENGTH) {
+      setError(`Enter the ${OTP_LENGTH}-digit code from your email.`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: form.email.trim(),
+        token: code,
+        type: 'signup',
+      });
+
+      if (verifyError) {
+        setError(
+          /expired|invalid/i.test(verifyError.message)
+            ? 'That code is incorrect or has expired. Request a new one and try again.'
+            : verifyError.message,
+        );
+        setCode('');
+        return;
+      }
+
+      // Email confirmed and signed in — App.tsx's onAuthStateChange now
+      // swaps this page for the Dashboard.
       onSuccess?.();
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -108,6 +181,30 @@ export default function FacultySignUpPage({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResend = async () => {
+    if (cooldown > 0 || loading) return;
+    setError(null);
+    setNotice(null);
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email: form.email.trim(),
+    });
+    if (resendError) {
+      setError(resendError.message);
+      return;
+    }
+    setCode('');
+    setNotice('A new code is on its way.');
+    setCooldown(RESEND_COOLDOWN_SECONDS);
+  };
+
+  const handleChangeEmail = () => {
+    setError(null);
+    setNotice(null);
+    setCode('');
+    setStep('form');
   };
 
   return (
@@ -158,29 +255,66 @@ export default function FacultySignUpPage({
 
         <div className="fsu-form-wrap">
           <div className="fsu-form-card">
-            <h1 className="fsu-heading">Create your faculty account</h1>
+            <h1 className="fsu-heading">
+              {step === 'verify' ? 'Verify your email' : 'Create your faculty account'}
+            </h1>
             <p className="fsu-subheading">
-              Enter your details below to get started on AppointPro.
+              {step === 'verify'
+                ? `We sent a ${OTP_LENGTH}-digit code to ${form.email.trim()}. Enter it below to finish creating your account.`
+                : 'Enter your details below to get started on AppointPro.'}
             </p>
 
-            {success ? (
-              <div className="fsu-success">
-                <div className="fsu-success-icon">
-                  <ShieldIcon />
+            {step === 'verify' ? (
+              <form className="fsu-form" onSubmit={handleVerify} noValidate>
+                <div className="fsu-field">
+                  <label className="fsu-label" htmlFor="otp">
+                    Verification Code
+                  </label>
+                  <input
+                    id="otp"
+                    className="fsu-input fsu-otp-input"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    placeholder={'•'.repeat(OTP_LENGTH)}
+                    maxLength={OTP_LENGTH}
+                    value={code}
+                    onChange={(e) =>
+                      setCode(e.target.value.replace(/\D/g, '').slice(0, OTP_LENGTH))
+                    }
+                  />
                 </div>
-                <h3>Almost there</h3>
-                <p>
-                  Your faculty account request was submitted. Check your
-                  email to confirm your account before logging in.
-                </p>
+
+                {notice && <p className="fsu-notice">{notice}</p>}
+                {error && <p className="fsu-error">{error}</p>}
+
                 <button
-                  type="button"
+                  type="submit"
                   className="fsu-submit"
-                  onClick={onLogin}
+                  disabled={loading || code.length !== OTP_LENGTH}
                 >
-                  Go to Log in
+                  {loading && <span className="lp-spinner" aria-hidden="true" />}
+                  {loading ? 'Verifying…' : 'Verify & Create Account'}
                 </button>
-              </div>
+
+                <div className="fsu-verify-actions">
+                  <span>Didn&apos;t get the code?</span>
+                  {cooldown > 0 ? (
+                    <span className="fsu-cooldown">Resend in {cooldown}s</span>
+                  ) : (
+                    <button type="button" className="fsu-link" onClick={handleResend}>
+                      Resend code
+                    </button>
+                  )}
+                </div>
+                <div className="fsu-verify-actions">
+                  <span>Wrong email?</span>
+                  <button type="button" className="fsu-link" onClick={handleChangeEmail}>
+                    Go back
+                  </button>
+                </div>
+              </form>
             ) : (
               <form className="fsu-form" onSubmit={handleSubmit} noValidate>
                 <div className="fsu-grid">
