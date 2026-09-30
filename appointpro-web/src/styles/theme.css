@@ -1,0 +1,150 @@
+/*
+  AppointPro — shared design tokens
+  ---------------------------------
+  One source of truth for color, elevation, radius, spacing and motion so
+  every screen (login, sign up, dashboard, appointments, faculty,
+  notifications) reads as one coherent product instead of five different
+  screens stitched together.
+
+  Brand colors are intentionally unchanged (#7A0E2C maroon) — this file
+  only formalizes them into a scale and adds the supporting neutrals,
+  semantic colors, elevation and motion tokens the refreshed UI relies on.
+*/
+
+:root {
+  /* ---------- Brand ---------- */
+  --brand-50: #fdf1f4;
+  --brand-100: #fbe3e9;
+  --brand-200: #f6d0da;
+  --brand-300: #e9c7ce;
+  --brand-400: #b3153a;
+  --brand-500: #7a0e2c;
+  --brand-600: #5c0a21;
+  --brand-700: #470819;
+  --brand-gradient: linear-gradient(155deg, #8a1433 0%, #5c0a21 100%);
+  --brand-gradient-soft: linear-gradient(135deg, #fdf1f4 0%, #fbe3e9 100%);
+
+  /* ---------- Neutrals ---------- */
+  --gray-0: #ffffff;
+  --gray-25: #fcfbfc;
+  --gray-50: #f7f5f6;
+  --gray-100: #f4f3f5;
+  --gray-150: #eeecee;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca0a8;
+  --gray-500: #6b7280;
+  --gray-600: #4b4f58;
+  --gray-700: #33363d;
+  --gray-800: #1f2024;
+  --gray-900: #1a1a1a;
+
+  /* ---------- Semantic ---------- */
+  --color-success: #1f9d55;
+  --color-success-bg: #e4f6eb;
+  --color-info: #2563eb;
+  --color-info-bg: #e3edfb;
+  --color-violet: #6a3fd6;
+  --color-violet-bg: #ece5fb;
+  --color-danger: #d93025;
+  --color-danger-bg: #fdeceb;
+  --color-warning: #b7791f;
+  --color-warning-bg: #fdf3e0;
+
+  /* ---------- Text ---------- */
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-500);
+  --text-tertiary: var(--gray-400);
+  --text-on-brand: #ffffff;
+
+  /* ---------- Surfaces ---------- */
+  --surface-page: var(--gray-50);
+  --surface-card: var(--gray-0);
+  --surface-muted: var(--gray-100);
+  --surface-border: var(--gray-200);
+  --surface-border-strong: var(--gray-300);
+
+  /* ---------- Radius ---------- */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  /* ---------- Elevation ---------- */
+  --shadow-xs: 0 1px 2px rgba(26, 15, 20, 0.05);
+  --shadow-sm: 0 2px 8px rgba(58, 15, 30, 0.06);
+  --shadow-md: 0 8px 24px rgba(58, 15, 30, 0.08);
+  --shadow-lg: 0 16px 40px rgba(58, 15, 30, 0.14);
+  --shadow-brand: 0 10px 24px rgba(122, 14, 44, 0.24);
+  --ring-focus: 0 0 0 3px rgba(122, 14, 44, 0.18);
+
+  /* ---------- Motion ---------- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 0.15s;
+  --duration-base: 0.2s;
+  --duration-slow: 0.35s;
+
+  /* ---------- Type ---------- */
+  --font-sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---------- Global resets that every page relies on ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--surface-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--brand-200);
+  color: var(--brand-600);
+}
+
+/* Consistent, brand-colored focus ring on every interactive element,
+   only when navigating by keyboard (mouse clicks stay clean). */
+:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Slim, unobtrusive scrollbars used across scrollable panes. */
+.themed-scroll,
+.db-main,
+.db-form-wrap,
+.nv-notification-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-200) transparent;
+}
+
+.themed-scroll::-webkit-scrollbar,
+.db-main::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.themed-scroll::-webkit-scrollbar-thumb,
+.db-main::-webkit-scrollbar-thumb {
+  background: var(--brand-200);
+  border-radius: 8px;
+}

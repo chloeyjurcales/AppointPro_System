@@ -1,0 +1,547 @@
+.nv-page {
+  width: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.nv-notifications-card {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+/* HEADER */
+
+.nv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px 30px 20px;
+}
+
+.nv-header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #612d00;
+}
+
+.nv-header p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #777;
+}
+
+/* HEADER BUTTONS */
+
+.nv-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nv-action-button,
+.nv-cancel-button,
+.nv-delete-button {
+  min-height: 40px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+/* Normal button */
+
+.nv-action-button {
+  border: 1px solid #d4ab8e;
+  background: #ffffff;
+  color: #612d00;
+}
+
+.nv-action-button:hover:not(:disabled) {
+  background: #612d00;
+  border-color: #612d00;
+  color: #ffffff;
+}
+
+/* Cancel */
+
+.nv-cancel-button {
+  border: 1px solid #d8d8d8;
+  background: #ffffff;
+  color: #555;
+}
+
+.nv-cancel-button:hover {
+  background: #f3f3f3;
+}
+
+/* Delete */
+
+.nv-delete-button {
+  border: 1px solid #c94a4a;
+  background: #ffffff;
+  color: #c03939;
+}
+
+.nv-delete-button:hover:not(:disabled) {
+  background: #c03939;
+  border-color: #c03939;
+  color: #ffffff;
+}
+
+/* Disabled buttons */
+
+.nv-action-button:disabled,
+.nv-delete-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* SELECT TOOLBAR */
+
+.nv-select-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 0 30px;
+  padding: 13px 16px;
+  border: 1px solid #eadfd7;
+  background: #faf7f4;
+  border-radius: 10px;
+}
+
+.nv-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  color: #612d00;
+  font-size: 14px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.nv-select-all input,
+.nv-checkbox-wrapper input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #612d00;
+  cursor: pointer;
+}
+
+.nv-selected-count {
+  font-size: 13px;
+  color: #777;
+}
+
+/* NOTIFICATION LIST */
+
+.nv-notification-list {
+  max-height: 600px;
+  overflow-y: auto;
+  padding: 18px 30px 30px;
+}
+
+.nv-notification-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.nv-notification-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nv-notification-list::-webkit-scrollbar-thumb {
+  background: #d4ab8e;
+  border-radius: 20px;
+}
+
+.nv-notification-list::-webkit-scrollbar-thumb:hover {
+  background: #b98c6a;
+}
+
+/* NOTIFICATION */
+
+.nv-notification {
+  position: relative;
+  display: grid;
+
+  /*
+    Normal mode:
+    icon | content | time
+  */
+  grid-template-columns:
+    48px
+    minmax(0, 1fr)
+    auto;
+
+  align-items: center;
+  gap: 14px;
+
+  padding: 18px 16px;
+
+  border-bottom: 1px solid #eee7e2;
+  background: #ffffff;
+
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.nv-notification:first-child {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.nv-notification:last-child {
+  border-bottom: none;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.nv-notification:hover {
+  background: #fcfaf8;
+}
+
+/*
+  When selection mode is active,
+  checkbox appears on the left.
+*/
+
+.nv-notification:has(
+  .nv-checkbox-wrapper
+) {
+  grid-template-columns:
+    24px
+    48px
+    minmax(0, 1fr)
+    auto;
+}
+
+/* SELECTED */
+
+.nv-notification-selected {
+  background: #f7eee7 !important;
+  box-shadow: inset 3px 0 0 #612d00;
+}
+
+/* UNREAD */
+
+.nv-notification-unread {
+  background: #fffaf6;
+}
+
+.nv-notification-unread:hover {
+  background: #fdf3ec;
+}
+
+.nv-notification-unread::before {
+  content: '';
+
+  position: absolute;
+
+  left: 7px;
+  top: 50%;
+
+  width: 7px;
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: #612d00;
+
+  transform: translateY(-50%);
+}
+
+/* CHECKBOX */
+
+.nv-checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ICON */
+
+.nv-notification-icon {
+  width: 48px;
+  height: 48px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: #eddccb;
+  color: #612d00;
+}
+
+.nv-notification-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.nv-notification:nth-of-type(4n + 2)
+  .nv-notification-icon {
+  background: #f1e4d8;
+}
+
+.nv-notification:nth-of-type(4n + 3)
+  .nv-notification-icon {
+  background: #e8ded4;
+}
+
+.nv-notification:nth-of-type(4n + 4)
+  .nv-notification-icon {
+  background: #f4e9df;
+}
+
+/* CONTENT */
+
+.nv-notification-copy {
+  min-width: 0;
+}
+
+.nv-notification-copy h2 {
+  margin: 0 0 5px;
+
+  color: #2d211a;
+
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.nv-notification-copy p {
+  margin: 0;
+
+  color: #777;
+
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* TIME */
+
+.nv-notification time {
+  color: #999;
+
+  font-size: 12px;
+
+  white-space: nowrap;
+
+  align-self: flex-start;
+
+  margin-top: 4px;
+}
+
+/* EMPTY STATE */
+
+.nv-empty-state {
+  padding: 70px 20px;
+
+  text-align: center;
+
+  color: #777;
+}
+
+.nv-empty-icon {
+  width: 60px;
+  height: 60px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin: 0 auto 15px;
+
+  border-radius: 50%;
+
+  background: #eddccb;
+  color: #612d00;
+
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.nv-empty-state h2 {
+  margin: 0 0 6px;
+
+  color: #2d211a;
+
+  font-size: 18px;
+}
+
+.nv-empty-state p {
+  margin: 0;
+
+  font-size: 13px;
+}
+
+/* TABLET */
+
+@media (max-width: 800px) {
+  .nv-page {
+    padding: 16px;
+  }
+
+  .nv-header {
+    padding: 22px 20px 16px;
+
+    align-items: flex-start;
+
+    flex-direction: column;
+  }
+
+  .nv-header-actions {
+    width: 100%;
+
+    justify-content: flex-start;
+  }
+
+  .nv-select-toolbar {
+    margin: 0 20px;
+  }
+
+  .nv-notification-list {
+    padding: 14px 20px 20px;
+  }
+
+  .nv-notification {
+    grid-template-columns:
+      44px
+      minmax(0, 1fr)
+      auto;
+  }
+
+  .nv-notification:has(
+    .nv-checkbox-wrapper
+  ) {
+    grid-template-columns:
+      24px
+      44px
+      minmax(0, 1fr);
+  }
+
+  .nv-notification time {
+    grid-column: 3;
+
+    margin-top: 2px;
+  }
+
+  .nv-notification:has(
+    .nv-checkbox-wrapper
+  ) time {
+    grid-column: 3;
+  }
+
+  .nv-notification-icon {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* MOBILE */
+
+@media (max-width: 560px) {
+  .nv-page {
+    padding: 10px;
+  }
+
+  .nv-notifications-card {
+    border-radius: 14px;
+  }
+
+  .nv-header {
+    padding: 20px 16px 15px;
+  }
+
+  .nv-header h1 {
+    font-size: 24px;
+  }
+
+  .nv-header-actions {
+    flex-direction: row;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .nv-action-button,
+  .nv-cancel-button,
+  .nv-delete-button {
+    flex: 1;
+  }
+
+  .nv-select-toolbar {
+    margin: 0 16px;
+    padding: 11px 12px;
+  }
+
+  .nv-notification-list {
+    padding: 12px 16px 16px;
+  }
+
+  .nv-notification {
+    grid-template-columns:
+      42px
+      minmax(0, 1fr);
+
+    gap: 10px;
+
+    padding: 15px 10px;
+  }
+
+  .nv-notification:has(
+    .nv-checkbox-wrapper
+  ) {
+    grid-template-columns:
+      22px
+      42px
+      minmax(0, 1fr);
+  }
+
+  .nv-notification-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .nv-notification-icon svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .nv-notification-copy h2 {
+    font-size: 14px;
+  }
+
+  .nv-notification-copy p {
+    font-size: 12px;
+  }
+
+  .nv-notification time {
+    grid-column: 2;
+
+    font-size: 11px;
+  }
+
+  .nv-notification:has(
+    .nv-checkbox-wrapper
+  ) time {
+    grid-column: 3;
+  }
+}
