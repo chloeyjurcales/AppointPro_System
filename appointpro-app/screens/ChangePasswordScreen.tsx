@@ -90,18 +90,6 @@ export default function ChangePasswordScreen({
             isPassword
           />
 
-          <View style={styles.infoBox}>
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={18}
-              color={colors.infoText}
-              style={styles.infoIcon}
-            />
-            <Text style={styles.infoText}>
-              Use at least 8 characters with a mix of letters, numbers, and symbols.
-            </Text>
-          </View>
-
           <TouchableOpacity
             style={styles.saveButton}
             onPress={() => onSave?.({ currentPassword, newPassword, confirmPassword })}

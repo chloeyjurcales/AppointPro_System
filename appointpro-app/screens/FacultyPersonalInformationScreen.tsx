@@ -207,18 +207,6 @@ export default function FacultyPersonalInformationScreen({
             isPassword
           />
 
-          <View style={styles.infoBox}>
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={18}
-              color={colors.infoText}
-              style={styles.infoIcon}
-            />
-            <Text style={styles.infoText}>
-              Use at least 8 characters with a mix of letters, numbers, and symbols.
-            </Text>
-          </View>
-
           {passwordError && <Text style={styles.errorText}>{passwordError}</Text>}
 
           <AnimatedPressable style={styles.saveButton} onPress={handleSave} scaleTo={0.97} disabled={saving}>

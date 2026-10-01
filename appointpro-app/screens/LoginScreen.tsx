@@ -13,7 +13,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import Logo from '../components/Logo';
 import AuthInput from '../components/AuthInput';
-import SocialButton from '../components/SocialButton';
 
 type Role = 'student' | 'faculty';
 
@@ -127,16 +126,6 @@ export default function LoginScreen({
           >
             <Text style={styles.loginButtonText}>{submitting ? 'Logging In…' : 'Log In'}</Text>
           </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialRow}>
-            <SocialButton provider="google" />
-          </View>
 
           <View style={styles.signupRow}>
             <Text style={styles.signupText}>Don't have an account? </Text>
@@ -260,26 +249,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '700',
     fontSize: 15,
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  dividerText: {
-    marginHorizontal: 8,
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: spacing.md,
   },
   signupRow: {
     flexDirection: 'row',

@@ -137,18 +137,6 @@ export default function StudentSignUpScreen({
             isPassword
           />
 
-          <View style={styles.infoBox}>
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={18}
-              color={colors.infoText}
-              style={styles.infoIcon}
-            />
-            <Text style={styles.infoText}>
-              Use at least 8 characters with a mix of letters, numbers, and symbols.
-            </Text>
-          </View>
-
           {!!errorMessage && (
             <View style={styles.errorBox}>
               <Ionicons name="alert-circle-outline" size={14} color={colors.danger} />
