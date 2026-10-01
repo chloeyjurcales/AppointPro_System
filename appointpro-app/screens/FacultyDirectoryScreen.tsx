@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
 type AppointmentStatus = 'upcoming' | 'pending' | 'completed' | 'cancelled';
 type ConsultationMode = 'face-to-face' | 'online';
@@ -213,6 +213,7 @@ type FacultyDirectoryScreenProps = {
   onApprovePress?: (appointment: StudentAppointment) => void;
   onDeclinePress?: (appointment: StudentAppointment) => void;
   onTabChange?: (tab: FacultyTabKey) => void;
+  onMenuPress?: () => void;
 };
 
 export default function FacultyDirectoryScreen({
@@ -223,6 +224,7 @@ export default function FacultyDirectoryScreen({
   onApprovePress,
   onDeclinePress,
   onTabChange,
+  onMenuPress,
 }: FacultyDirectoryScreenProps) {
   const [activeFilter, setActiveFilter] = useState<AppointmentStatus>('upcoming');
 
@@ -255,6 +257,9 @@ export default function FacultyDirectoryScreen({
         keyboardVerticalOffset={0}
       >
       <View style={styles.header}>
+        <TouchableOpacity onPress={onMenuPress} style={styles.menuButton}>
+          <Feather name="menu" size={24} color={colors.textDark} />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Directory</Text>
       </View>
 
@@ -383,7 +388,6 @@ export default function FacultyDirectoryScreen({
         }
       />
 
-      <FacultyBottomTabBar active="directory" onChange={onTabChange} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -399,7 +403,15 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: spacing.md,
+  },
+  menuButton: {
+    position: 'absolute',
+    left: spacing.lg,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,

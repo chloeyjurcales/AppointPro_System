@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   StyleSheet,
@@ -26,6 +27,7 @@ import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import * as Linking from 'expo-linking';
 import SettingsScreen from './screens/SettingsScreen';
+import FacultyFab from './components/FacultyFab';
 import AccountTypeScreen from './screens/AccountTypeScreen';
 import StudentSignUpScreen from './screens/StudentSignUpScreen';
 import FacultySignUpScreen from './screens/FacultySignUpScreen';
@@ -72,6 +74,8 @@ import FacultyActionSuccessScreen, {
 } from './screens/FacultyActionSuccessScreen';
 import BookingRescheduleScreen from './screens/BookingRescheduleScreen';
 import RecurringScheduleScreen from './screens/RecurringScheduleScreen';
+import SlotIQScreen from './screens/SlotIQScreen';
+import type { SlotIQSuggestion } from './lib/slotiq';
 import SideMenu, { SideMenuKey, SideMenuRole } from './components/SideMenu';
 import { TabKey } from './components/BottomTabBar';
 import { FacultyTabKey } from './components/FacultyBottomTabBar';
@@ -145,7 +149,8 @@ type Screen =
   | 'rescheduleProposal'
   | 'facultyCancelAppointment'
   | 'facultyActionSuccess'
-  | 'recurringSchedule';
+  | 'recurringSchedule'
+  | 'slotIQ';
 
 type StudentProfileData = PersonalInformation & {
   studentId: string;
@@ -529,6 +534,11 @@ function AppContent() {
   const [previousScreen, setPreviousScreen] = useState<Screen>('profile');
   const [userRole, setUserRole] = useState<SideMenuRole>('student');
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
+
+  // Keeps unsaved Personal Information edits available even if the user
+  // leaves the Personal Information screen before pressing Save Changes.
+  const [studentPersonalDraft, setStudentPersonalDraft] = useState<PersonalInformation | null>(null);
+  const [facultyPersonalDraft, setFacultyPersonalDraft] = useState<FacultyPersonalInformation | null>(null);
 
   // Whether a chime plays when a new student notification arrives —
   // toggled from Settings. Defaults on so the feature is discoverable.
@@ -1831,11 +1841,94 @@ function AppContent() {
     ? (screen as SideMenuKey)
     : undefined;
 
-  // Signs the user out for real. The Profile screens' Log Out buttons only
-  // changed the screen before, leaving the Supabase session (and the
-  // previous user's data) alive behind the login form.
-  const handleLogout = () => {
+  const saveStudentPersonalInformation = async (
+    data: PersonalInformation,
+    passwordChange?: { currentPassword: string; newPassword: string }
+  ) => {
+    if (!session) throw new Error('You are signed out. Please log in again.');
+
+    const { emailChangePending } = await applyAccountChanges(
+      data.name,
+      data.email,
+      studentProfile.email,
+      passwordChange
+    );
+
+    const department = data.department.trim();
+    const yearLevel = data.yearLevel.trim();
+    const { error: studentError } = await supabase
+      .from('students')
+      .update({ department, year_level: yearLevel })
+      .eq('profile_id', session.user.id);
+
+    if (studentError) throw new Error(studentError.message);
+
+    setStudentProfile((prev) => ({
+      ...prev,
+      name: data.name.trim(),
+      department,
+      yearLevel,
+      role: yearLevel ? `${yearLevel} Student` : 'Student',
+      email: emailChangePending ? prev.email : data.email.trim(),
+    }));
+
+    setStudentPersonalDraft(null);
+    showToast(
+      emailChangePending
+        ? 'Saved. Confirm the link sent to your new email to change it.'
+        : passwordChange
+        ? 'Password updated'
+        : 'Profile saved'
+    );
+  };
+
+  const saveFacultyPersonalInformation = async (
+    data: FacultyPersonalInformation,
+    passwordChange?: { currentPassword: string; newPassword: string }
+  ) => {
+    if (!session) throw new Error('You are signed out. Please log in again.');
+
+    const { emailChangePending } = await applyAccountChanges(
+      data.name,
+      data.email,
+      facultyProfile.email,
+      passwordChange
+    );
+
+    const department = data.fullDepartment.trim();
+    const { error: facultyError } = await supabase
+      .from('faculty')
+      .update({ department, consultation_types: data.consultationTypes })
+      .eq('profile_id', session.user.id);
+
+    if (facultyError) throw new Error(facultyError.message);
+
+    setFacultyProfile((prev) => ({
+      ...prev,
+      name: data.name.trim(),
+      department,
+      fullDepartment: department,
+      consultationTypes: data.consultationTypes,
+      email: emailChangePending ? prev.email : data.email.trim(),
+    }));
+
+    setFacultyPersonalDraft(null);
+    showToast(
+      emailChangePending
+        ? 'Saved. Confirm the link sent to your new email to change it.'
+        : passwordChange
+        ? 'Password updated'
+        : 'Profile saved'
+    );
+  };
+
+  // Signs the user out for real. If Personal Information contains edits that
+  // have not been saved yet, the user gets the choice to add/save them or
+  // discard them before the Supabase session is ended.
+  const performLogout = () => {
     setSideMenuOpen(false);
+    setStudentPersonalDraft(null);
+    setFacultyPersonalDraft(null);
     setConfirmedBooking(null);
     setSelectedFaculty(null);
     setSelectedAppointmentId(null);
@@ -1848,7 +1941,58 @@ function AppContent() {
     setAuthError(null);
     setUserRole('student');
     setScreen('login');
-    supabase.auth.signOut();
+    void supabase.auth.signOut();
+  };
+
+  const handleLogout = () => {
+    const draft = userRole === 'faculty' ? facultyPersonalDraft : studentPersonalDraft;
+
+    if (!draft) {
+      Alert.alert(
+        'Log out?',
+        'Are you sure you want to log out of your AppointPro account?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Yes, Log Out', style: 'destructive', onPress: performLogout },
+        ]
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Are you sure you want to log out?',
+      'You have unsaved changes in your Personal Information.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: "Don't Save Changes",
+          style: 'destructive',
+          onPress: () => {
+            setStudentPersonalDraft(null);
+            setFacultyPersonalDraft(null);
+            performLogout();
+          },
+        },
+        {
+          text: 'Add Changes',
+          onPress: async () => {
+            try {
+              if (userRole === 'faculty') {
+                await saveFacultyPersonalInformation(draft as FacultyPersonalInformation);
+              } else {
+                await saveStudentPersonalInformation(draft as PersonalInformation);
+              }
+              performLogout();
+            } catch (err) {
+              showToast(err instanceof Error ? err.message : 'Could not save your changes.');
+            }
+          },
+        },
+      ]
+    );
   };
   const handleSideMenuLogout = handleLogout;
 
@@ -2026,6 +2170,143 @@ function AppContent() {
     });
     setRecurringRules((prev) => [...prev, mapRecurringRuleRow(insertedRule as RecurringRuleRow)]);
     setScreen('facultyAvailability');
+  };
+
+  const handleOpenSlotIQ = () => {
+    setScreen('slotIQ');
+  };
+
+  const handleApproveSlotIQ = async (suggestions: SlotIQSuggestion[], semesterEndDate: string) => {
+    if (!session) return;
+    if (!suggestions.length) return;
+
+    const startDateKey = toDateKey(new Date());
+    // Gemini may return "HH:MM" or "HH:MM:SS" — always work with "HH:MM:SS".
+    const toFullTime = (t: string) => (t.length === 5 ? `${t}:00` : t);
+
+    const unique = new Map<string, SlotIQSuggestion>();
+    suggestions.forEach((suggestion) => {
+      const days = [...new Set(suggestion.daysOfWeek)]
+        .filter((day) => day >= 0 && day <= 6)
+        .sort((a, b) => a - b);
+      const startTime = toFullTime(suggestion.startTime);
+      const endTime = toFullTime(suggestion.endTime);
+      const key = `${days.join(',')}-${startTime}-${endTime}-${suggestion.mode}-${suggestion.location}`;
+      if (days.length && startTime < endTime) {
+        unique.set(key, { ...suggestion, daysOfWeek: days, startTime, endTime });
+      }
+    });
+
+    if (!unique.size) {
+      throw new Error('SlotIQ did not return any valid schedule suggestions.');
+    }
+
+    // Load the faculty's existing slots for the semester so we never insert a
+    // slot that already exists (unique key) or overlaps another slot.
+    const { data: existingRows, error: existingError } = await supabase
+      .from('availability_slots')
+      .select('date,start_time,end_time')
+      .eq('faculty_id', session.user.id)
+      .gte('date', startDateKey)
+      .lte('date', semesterEndDate);
+    if (existingError) throw new Error(existingError.message);
+
+    const occupied = new Map<string, { start: string; end: string }[]>();
+    ((existingRows ?? []) as { date: string; start_time: string; end_time: string }[]).forEach((row) => {
+      occupied.set(row.date, [
+        ...(occupied.get(row.date) ?? []),
+        { start: toFullTime(row.start_time), end: toFullTime(row.end_time) },
+      ]);
+    });
+
+    let saved = 0;
+    let skippedSlots = 0;
+
+    for (const suggestion of unique.values()) {
+      const start = new Date(`${startDateKey}T00:00:00`);
+      const end = new Date(`${semesterEndDate}T00:00:00`);
+      const totalMinutes = minutesBetween(suggestion.startTime, suggestion.endTime);
+
+      // Work out which dates can actually get a slot.
+      const freeDates: string[] = [];
+      const cursor = new Date(start);
+      let safety = 0;
+      while (cursor <= end && safety < 400) {
+        safety++;
+        if (suggestion.daysOfWeek.includes(cursor.getDay())) {
+          const dateKey = toDateKey(cursor);
+          const taken = occupied.get(dateKey) ?? [];
+          const clashes = taken.some((range) =>
+            timeRangesOverlap(range.start, range.end, suggestion.startTime, suggestion.endTime)
+          );
+          if (clashes) skippedSlots++;
+          else freeDates.push(dateKey);
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      // Everything this suggestion would create already exists.
+      if (!freeDates.length) continue;
+
+      const { data: insertedRule, error: ruleError } = await supabase
+        .from('recurring_rules')
+        .insert({
+          faculty_id: session.user.id,
+          days_of_week: suggestion.daysOfWeek,
+          start_time: suggestion.startTime,
+          end_time: suggestion.endTime,
+          mode: suggestion.mode,
+          location: suggestion.location,
+          start_date: startDateKey,
+          end_date: semesterEndDate,
+        })
+        .select()
+        .single();
+
+      if (ruleError || !insertedRule) {
+        throw new Error(ruleError?.message ?? 'Could not save a SlotIQ schedule.');
+      }
+
+      const rowsToInsert = freeDates.map((dateKey) => ({
+        faculty_id: session.user.id,
+        rule_id: insertedRule.id,
+        date: dateKey,
+        start_time: suggestion.startTime,
+        end_time: suggestion.endTime,
+        mode: suggestion.mode,
+        location: suggestion.location,
+        total_minutes: totalMinutes,
+      }));
+
+      const { error: slotsError } = await supabase.from('availability_slots').insert(rowsToInsert);
+      if (slotsError) {
+        // Roll back the recurring rule if its concrete slots could not be created.
+        await supabase.from('recurring_rules').delete().eq('id', insertedRule.id);
+        throw new Error(`Could not create the schedule slots: ${slotsError.message}`);
+      }
+
+      // Remember these so later suggestions in this batch can't overlap them.
+      freeDates.forEach((dateKey) => {
+        occupied.set(dateKey, [
+          ...(occupied.get(dateKey) ?? []),
+          { start: suggestion.startTime, end: suggestion.endTime },
+        ]);
+      });
+      saved++;
+    }
+
+    await reloadFacultyAvailability();
+    setScreen('facultyAvailability');
+
+    if (saved === 0) {
+      showToast('These times already exist in your schedule, so nothing new was added.');
+    } else if (skippedSlots > 0) {
+      showToast(
+        `${saved} SlotIQ schedule${saved === 1 ? '' : 's'} saved. ${skippedSlots} slot${skippedSlots === 1 ? '' : 's'} skipped because they already exist.`
+      );
+    } else {
+      showToast(`${saved} SlotIQ schedule${saved === 1 ? '' : 's'} saved for the semester.`);
+    }
   };
 
   const handleDeleteRecurringRule = async (ruleId: string) => {
@@ -3507,7 +3788,7 @@ function AppContent() {
             onOpenPendingReschedules={() => setScreen('facultyDirectory')}
             onOpenAvailability={() => setScreen('facultyAvailability')}
             onOpenWalkInQueue={() => setScreen('queue')}
-            onOpenSlotIQAI={() => console.log('Open SlotIQ AI')}
+            onOpenSlotIQAI={handleOpenSlotIQ}
             onTabChange={handleFacultyTabChange}
           />
         )}
@@ -3529,6 +3810,7 @@ function AppContent() {
             }}
             onApprovePress={handleFacultyApprove}
             onDeclinePress={handleFacultyDecline}
+            onMenuPress={() => openSideMenu('faculty')}
             onTabChange={handleFacultyTabChange}
           />
         )}
@@ -3561,6 +3843,7 @@ function AppContent() {
             onToggleSlot={handleToggleFacultySlot}
             onDeleteTimeSlot={handleDeleteFacultySlot}
             onSetRecurringSchedule={() => setScreen('recurringSchedule')}
+            onSlotIQPress={handleOpenSlotIQ}
             onDeleteRecurringRule={handleDeleteRecurringRule}
             onSaveAvailability={() => {
               console.log('Save availability:', facultySlotsByDate);
@@ -3582,6 +3865,14 @@ function AppContent() {
           <RecurringScheduleScreen
             onBack={() => setScreen('facultyAvailability')}
             onConfirm={handleCreateRecurringRule}
+          />
+        )}
+
+        {screen === 'slotIQ' && (
+          <SlotIQScreen
+            onBack={() => setScreen('facultyAvailability')}
+            onApprove={handleApproveSlotIQ}
+            onTabChange={handleFacultyTabChange}
           />
         )}
 
@@ -3620,42 +3911,19 @@ function AppContent() {
 
         {screen === 'personalInformation' && (
           <PersonalInformationScreen
-            {...studentProfile}
+            studentId={studentProfile.studentId}
             onBack={() => setScreen(previousScreen)}
             // Persists to Supabase (this used to only update local state and
             // log the password change to the console). Throws on failure so
             // the form stays open with the error toast.
+            name={studentPersonalDraft?.name ?? studentProfile.name}
+            email={studentPersonalDraft?.email ?? studentProfile.email}
+            department={studentPersonalDraft?.department ?? studentProfile.department}
+            yearLevel={studentPersonalDraft?.yearLevel ?? studentProfile.yearLevel}
+            onDraftChange={setStudentPersonalDraft}
             onSave={async (data, passwordChange) => {
               try {
-                const { emailChangePending } = await applyAccountChanges(
-                  data.name,
-                  data.email,
-                  studentProfile.email,
-                  passwordChange
-                );
-                const department = data.department.trim();
-                const yearLevel = data.yearLevel.trim();
-                const { error: studentError } = await supabase
-                  .from('students')
-                  .update({ department, year_level: yearLevel })
-                  .eq('profile_id', session!.user.id);
-                if (studentError) throw new Error(studentError.message);
-
-                setStudentProfile((prev) => ({
-                  ...prev,
-                  name: data.name.trim(),
-                  department,
-                  yearLevel,
-                  role: yearLevel ? `${yearLevel} Student` : 'Student',
-                  email: emailChangePending ? prev.email : data.email.trim(),
-                }));
-                showToast(
-                  emailChangePending
-                    ? 'Saved. Confirm the link sent to your new email to change it.'
-                    : passwordChange
-                    ? 'Password updated'
-                    : 'Profile saved'
-                );
+                await saveStudentPersonalInformation(data, passwordChange);
                 setScreen(previousScreen);
               } catch (err) {
                 showToast(err instanceof Error ? err.message : 'Could not save your changes.');
@@ -3667,38 +3935,16 @@ function AppContent() {
 
         {screen === 'facultyPersonalInformation' && (
           <FacultyPersonalInformationScreen
-            {...facultyProfile}
+            employeeId={facultyProfile.employeeId}
             onBack={() => setScreen(previousScreen)}
+            name={facultyPersonalDraft?.name ?? facultyProfile.name}
+            email={facultyPersonalDraft?.email ?? facultyProfile.email}
+            fullDepartment={facultyPersonalDraft?.fullDepartment ?? facultyProfile.fullDepartment}
+            consultationTypes={facultyPersonalDraft?.consultationTypes ?? facultyProfile.consultationTypes}
+            onDraftChange={setFacultyPersonalDraft}
             onSave={async (data, passwordChange) => {
               try {
-                const { emailChangePending } = await applyAccountChanges(
-                  data.name,
-                  data.email,
-                  facultyProfile.email,
-                  passwordChange
-                );
-                const department = data.fullDepartment.trim();
-                const { error: facultyError } = await supabase
-                  .from('faculty')
-                  .update({ department, consultation_types: data.consultationTypes })
-                  .eq('profile_id', session!.user.id);
-                if (facultyError) throw new Error(facultyError.message);
-
-                setFacultyProfile((prev) => ({
-                  ...prev,
-                  name: data.name.trim(),
-                  department,
-                  fullDepartment: department,
-                  consultationTypes: data.consultationTypes,
-                  email: emailChangePending ? prev.email : data.email.trim(),
-                }));
-                showToast(
-                  emailChangePending
-                    ? 'Saved. Confirm the link sent to your new email to change it.'
-                    : passwordChange
-                    ? 'Password updated'
-                    : 'Profile saved'
-                );
+                await saveFacultyPersonalInformation(data, passwordChange);
                 setScreen(previousScreen);
               } catch (err) {
                 showToast(err instanceof Error ? err.message : 'Could not save your changes.');
@@ -3832,6 +4078,22 @@ function AppContent() {
           />
         )}
       </Animated.View>
+
+      {!sideMenuOpen &&
+        (screen === 'facultyHome' ||
+          screen === 'facultyDirectory' ||
+          screen === 'facultyAvailability' ||
+          screen === 'facultyNotifications' ||
+          screen === 'facultyProfileMenu') && (
+          <FacultyFab
+            // The Availability screen has a "Save Availability" button pinned
+            // to the bottom, so lift the button above it there.
+            bottomOffset={screen === 'facultyAvailability' ? 72 : 0}
+            onAddTimeSlot={() => handleAddTimeSlot(toDateKey(new Date()))}
+            onSetRecurringSchedule={() => setScreen('recurringSchedule')}
+            onOpenSlotIQ={handleOpenSlotIQ}
+          />
+        )}
 
       <SideMenu
         visible={sideMenuOpen}

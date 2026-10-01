@@ -1,0 +1,12 @@
+# Supabase CLI local state (recreated by `supabase link`)
+supabase/.temp/
+
+# Secrets and local env files, anywhere in the repo
+.env
+.env.*
+!.env.example
+
+# Dependencies and Expo/Vite caches, anywhere in the repo
+node_modules/
+.expo/
+dist/

@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import {
   FacultySlot,
   FacultySlotsByDate,
@@ -35,6 +35,7 @@ type FacultyAvailabilityScreenProps = {
   onToggleSlot?: (dateKey: string, slotId: string) => void;
   onDeleteTimeSlot?: (dateKey: string, slotId: string) => void;
   onSetRecurringSchedule?: () => void;
+  onSlotIQPress?: () => void;
   onDeleteRecurringRule?: (ruleId: string) => void;
   onSaveAvailability?: () => void;
   onTabChange?: (tab: FacultyTabKey) => void;
@@ -49,6 +50,7 @@ export default function FacultyAvailabilityScreen({
   onToggleSlot,
   onDeleteTimeSlot,
   onSetRecurringSchedule,
+  onSlotIQPress,
   onDeleteRecurringRule,
   onSaveAvailability,
   onTabChange,
@@ -103,6 +105,17 @@ export default function FacultyAvailabilityScreen({
         <TouchableOpacity style={styles.recurringBanner} onPress={onSetRecurringSchedule} activeOpacity={0.85}>
           <Ionicons name="repeat" size={18} color={colors.primary} />
           <Text style={styles.recurringBannerText}>Set a Recurring Weekly Schedule</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.slotIQBanner} onPress={onSlotIQPress} activeOpacity={0.85}>
+          <View style={styles.slotIQIcon}>
+            <Ionicons name="sparkles" size={17} color={colors.primary} />
+          </View>
+          <View style={styles.slotIQTextWrap}>
+            <Text style={styles.slotIQTitle}>Generate with SlotIQ</Text>
+            <Text style={styles.slotIQSubtitle}>Let AI suggest your weekly consultation schedule.</Text>
+          </View>
           <Ionicons name="chevron-forward" size={16} color={colors.primary} />
         </TouchableOpacity>
 
@@ -271,7 +284,6 @@ export default function FacultyAvailabilityScreen({
         </TouchableOpacity>
       </View>
 
-      <FacultyBottomTabBar active="appointment" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
@@ -312,6 +324,28 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   recurringBannerText: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.infoText },
+  slotIQBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.infoBg,
+    borderRadius: 12,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    backgroundColor: colors.white,
+  },
+  slotIQIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.infoBg,
+    marginRight: spacing.sm,
+  },
+  slotIQTextWrap: { flex: 1 },
+  slotIQTitle: { fontSize: 13, fontWeight: '800', color: colors.textDark },
+  slotIQSubtitle: { marginTop: 2, fontSize: 10, color: colors.textMuted },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',

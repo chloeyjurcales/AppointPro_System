@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import { TabKey } from '../components/BottomTabBar';
 import { NotificationItem, INITIAL_STUDENT_NOTIFICATIONS } from '../data/notifications';
 
 type NotificationsScreenProps = {
@@ -185,7 +185,6 @@ export default function NotificationsScreen({
         }
       />
 
-      <BottomTabBar active="notifications" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

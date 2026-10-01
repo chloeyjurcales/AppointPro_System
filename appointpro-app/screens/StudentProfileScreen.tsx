@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
 type StudentProfileScreenProps = {
   studentName?: string;
@@ -181,7 +181,6 @@ export default function StudentProfileScreen({
         )}
       </ScrollView>
 
-      <FacultyBottomTabBar active="directory" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

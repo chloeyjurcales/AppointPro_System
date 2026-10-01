@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import { TabKey } from '../components/BottomTabBar';
 import ProfileAvatar from '../components/ProfileAvatar';
 import {
   QueueEntry,
@@ -374,7 +374,6 @@ export default function HomeScreen({
         )}
       </ScrollView>
 
-      <BottomTabBar active="home" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

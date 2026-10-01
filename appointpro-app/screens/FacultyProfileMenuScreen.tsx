@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
 type MenuItem = {
   key: string;
@@ -159,7 +159,6 @@ export default function FacultyProfileMenuScreen({
         </View>
       </ScrollView>
 
-      <FacultyBottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import {
   FacultySlot,
   FacultySlotsByDate,
@@ -150,7 +150,6 @@ export default function FacultyScheduleCalendarScreen({
         )}
       </View>
 
-      <FacultyBottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import ProfileAvatar from '../components/ProfileAvatar';
-import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import { TabKey } from '../components/BottomTabBar';
 
 type AppointmentStatus = 'upcoming' | 'completed' | 'canceled';
 type FilterKey = 'upcoming' | 'completed' | 'canceled';
@@ -312,7 +312,6 @@ export default function AppointmentsScreen({
         }
       />
 
-      <BottomTabBar active="appointments" onChange={onTabChange} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

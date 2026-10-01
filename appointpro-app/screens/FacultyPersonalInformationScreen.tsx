@@ -7,6 +7,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +32,7 @@ type FacultyPersonalInformationScreenProps = FacultyPersonalInformation & {
   employeeId?: string;
   onBack?: () => void;
   onSave?: (data: FacultyPersonalInformation, passwordChange?: PasswordChange) => void | Promise<void>;
+  onDraftChange?: (data: FacultyPersonalInformation | null) => void;
 };
 
 export default function FacultyPersonalInformationScreen({
@@ -41,6 +43,7 @@ export default function FacultyPersonalInformationScreen({
   employeeId,
   onBack,
   onSave,
+  onDraftChange,
 }: FacultyPersonalInformationScreenProps) {
   const [form, setForm] = useState<FacultyPersonalInformation>({
     name,
@@ -56,9 +59,47 @@ export default function FacultyPersonalInformationScreen({
   const [saving, setSaving] = useState(false);
 
   const update = (field: keyof FacultyPersonalInformation) => (value: string) =>
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      onDraftChange?.(next);
+      return next;
+    });
 
-  const handleSave = async () => {
+  // Validates the form, then asks the user to confirm before anything is saved.
+  const handleSave = () => {
+    if (saving) return;
+
+    const wantsPasswordChange = !!(currentPassword || newPassword || confirmPassword);
+
+    if (wantsPasswordChange) {
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        setPasswordError('Fill in all three password fields, or leave them all blank.');
+        return;
+      }
+      if (newPassword.length < 8) {
+        setPasswordError('New password must be at least 8 characters.');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setPasswordError('New passwords do not match.');
+        return;
+      }
+    }
+    setPasswordError(null);
+
+    Alert.alert(
+      'Save your changes?',
+      wantsPasswordChange
+        ? 'Are you sure you want to save the changes to your personal information and change your password?'
+        : 'Are you sure you want to save the changes to your personal information?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Yes, Save Changes', onPress: () => void performSave() },
+      ]
+    );
+  };
+
+  const performSave = async () => {
     if (saving) return;
 
     const wantsPasswordChange = !!(currentPassword || newPassword || confirmPassword);
@@ -68,6 +109,7 @@ export default function FacultyPersonalInformationScreen({
       setSaving(true);
       try {
         await onSave?.(form);
+        onDraftChange?.(null);
       } catch {
         // The parent displays the save error and keeps this screen open.
       } finally {
@@ -76,23 +118,11 @@ export default function FacultyPersonalInformationScreen({
       return;
     }
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setPasswordError('Fill in all three password fields, or leave them all blank.');
-      return;
-    }
-    if (newPassword.length < 8) {
-      setPasswordError('New password must be at least 8 characters.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordError('New passwords do not match.');
-      return;
-    }
-
     setPasswordError(null);
     setSaving(true);
     try {
       await onSave?.(form, { currentPassword, newPassword, confirmPassword });
+      onDraftChange?.(null);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');

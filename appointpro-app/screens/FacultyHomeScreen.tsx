@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import ProfileAvatar from '../components/ProfileAvatar';
 
 export type ScheduleMode = 'face-to-face' | 'online';
@@ -243,7 +243,6 @@ export default function FacultyHomeScreen({
         </View>
       </ScrollView>
 
-      <FacultyBottomTabBar active="home" onChange={onTabChange} />
 
       {showSlotIQNotice && (
         <View style={styles.toastWrap} pointerEvents="none">

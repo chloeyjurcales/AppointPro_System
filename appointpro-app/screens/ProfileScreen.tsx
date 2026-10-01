@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import { TabKey } from '../components/BottomTabBar';
 
 type MenuItem = {
   key: string;
@@ -156,7 +156,6 @@ export default function ProfileScreen({
         </View>
       </ScrollView>
 
-      <BottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

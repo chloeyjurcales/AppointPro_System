@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import { NotificationItem, INITIAL_FACULTY_NOTIFICATIONS } from '../data/notifications';
 
 type FacultyNotificationsScreenProps = {
@@ -198,7 +198,6 @@ export default function FacultyNotificationsScreen({
         }
       />
 
-      <FacultyBottomTabBar active="notifications" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
