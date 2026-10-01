@@ -5,6 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   Switch,
 } from 'react-native';
@@ -120,6 +122,11 @@ export default function AddTimeSlotScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack}>
           <Ionicons name="arrow-back" size={22} color={colors.textDark} />
@@ -269,14 +276,14 @@ export default function AddTimeSlotScreen({
                 onChangeText={setLocation}
                 placeholder={
                   isOnline
-                    ? 'Enter meeting link (e.g. Google Meet, Zoom)'
-                    : 'Enter room or location (e.g. Office Room 204)'
+                    ? 'Enter meeting link'
+                    : 'Enter room or location'
                 }
                 placeholderTextColor="#9B9B9B"
                 autoCapitalize="none"
               />
             </View>
-            {locationError && <Text style={styles.errorText}>{locationError}</Text>}
+            {locationError && <Text style={styles.locationErrorText}>{locationError}</Text>}
           </View>
 
           <View style={styles.recurringRow}>
@@ -306,6 +313,7 @@ export default function AddTimeSlotScreen({
       </ScrollView>
 
       <FacultyBottomTabBar active="appointment" onChange={onTabChange} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -314,6 +322,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -436,6 +447,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 44,
     marginTop: 6,
+    marginBottom: spacing.sm,
   },
   locationIcon: {
     marginRight: 8,
@@ -450,6 +462,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.danger,
     marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
+  locationErrorText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.danger,
+    marginTop: 0,
     marginBottom: spacing.md,
   },
   recurringRow: {

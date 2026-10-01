@@ -5,6 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -48,6 +50,11 @@ export default function DirectoryScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={onMenuPress}>
           <Ionicons name="menu" size={24} color={colors.textDark} />
@@ -118,6 +125,7 @@ export default function DirectoryScreen({
       />
 
       <BottomTabBar active="directory" onChange={onTabChange} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -126,6 +134,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',

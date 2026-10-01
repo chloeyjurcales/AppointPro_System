@@ -394,6 +394,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 44,
+    marginBottom: spacing.lg,
   },
   locationIcon: { marginRight: 8 },
   locationInput: { flex: 1, fontSize: 13, color: colors.textDark },

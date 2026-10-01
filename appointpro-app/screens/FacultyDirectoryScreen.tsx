@@ -7,6 +7,8 @@ import {
   FlatList,
   Image,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -247,6 +249,11 @@ export default function FacultyDirectoryScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Directory</Text>
       </View>
@@ -377,6 +384,7 @@ export default function FacultyDirectoryScreen({
       />
 
       <FacultyBottomTabBar active="directory" onChange={onTabChange} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -385,6 +393,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   header: {
     alignItems: 'center',

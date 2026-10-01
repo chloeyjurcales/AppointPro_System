@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -210,6 +212,11 @@ export default function AppointmentsScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
+      >
       <View style={styles.header}>
         <TouchableOpacity onPress={onMenuPress}>
           <Ionicons name="menu" size={24} color={colors.textDark} />
@@ -306,6 +313,7 @@ export default function AppointmentsScreen({
       />
 
       <BottomTabBar active="appointments" onChange={onTabChange} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -314,6 +322,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
