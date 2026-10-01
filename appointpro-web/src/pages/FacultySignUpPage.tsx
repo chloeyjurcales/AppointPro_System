@@ -435,14 +435,6 @@ export default function FacultySignUpPage({
                   </div>
                 </div>
 
-                <div className="fsu-info-box">
-                  <ShieldIcon />
-                  <p>
-                    Use at least 8 characters with a mix of letters, numbers,
-                    and symbols.
-                  </p>
-                </div>
-
                 {error && <p className="fsu-error">{error}</p>}
 
                 <button
@@ -473,26 +465,6 @@ function CheckIcon() {
         d="m8 12.5 2.5 2.5L16 9"
         stroke="#ffffff"
         strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 2 4 5v6c0 5 3.4 8.7 8 11 4.6-2.3 8-6 8-11V5l-8-3Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m9 12 2 2 4-4"
-        stroke="currentColor"
-        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

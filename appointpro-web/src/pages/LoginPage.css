@@ -439,7 +439,7 @@
 
 .lp-social-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-bottom: clamp(18px, 3vh, 26px);
 }
@@ -487,11 +487,5 @@
 
   .lp-panel {
     display: none;
-  }
-}
-
-@media (max-width: 480px) {
-  .lp-social-row {
-    grid-template-columns: 1fr;
   }
 }
