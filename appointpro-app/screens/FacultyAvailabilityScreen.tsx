@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -11,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import EditScheduleModal, { EditableScheduleValues, valuesFromLabel } from '../components/EditScheduleModal';
 import {
   FacultySlot,
   FacultySlotsByDate,
@@ -37,6 +39,8 @@ type FacultyAvailabilityScreenProps = {
   onSetRecurringSchedule?: () => void;
   onSlotIQPress?: () => void;
   onDeleteRecurringRule?: (ruleId: string) => void;
+  onEditTimeSlot?: (dateKey: string, slotId: string, values: EditableScheduleValues) => Promise<string | null>;
+  onEditRecurringRule?: (ruleId: string, values: EditableScheduleValues) => Promise<string | null>;
   onSaveAvailability?: () => void;
   onTabChange?: (tab: FacultyTabKey) => void;
 };
@@ -52,6 +56,8 @@ export default function FacultyAvailabilityScreen({
   onSetRecurringSchedule,
   onSlotIQPress,
   onDeleteRecurringRule,
+  onEditTimeSlot,
+  onEditRecurringRule,
   onSaveAvailability,
   onTabChange,
 }: FacultyAvailabilityScreenProps) {
@@ -60,6 +66,12 @@ export default function FacultyAvailabilityScreen({
   const weekDates = getWeekDates(weekStart);
   const todayIndex = weekDates.findIndex((d) => d.isToday);
   const [selectedDayIndex, setSelectedDayIndex] = useState(todayIndex >= 0 ? todayIndex : 0);
+
+  // What the edit form is currently editing (a single slot or a whole weekly schedule).
+  type EditTarget =
+    | { kind: 'slot'; dateKey: string; slotId: string; initial: EditableScheduleValues }
+    | { kind: 'rule'; ruleId: string; initial: EditableScheduleValues };
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
 
   const selectedDay = weekDates[selectedDayIndex];
   const currentSlots = slotsByDate[selectedDay.dateKey] ?? [];
@@ -130,9 +142,42 @@ export default function FacultyAvailabilityScreen({
                   <Text style={styles.ruleDetail}>{rule.location}</Text>
                   <Text style={styles.ruleDateRange}>{formatDateRangeLabel(rule)}</Text>
                 </View>
-                <TouchableOpacity onPress={() => onDeleteRecurringRule?.(rule.id)}>
-                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                </TouchableOpacity>
+                <View style={styles.iconGroup}>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setEditTarget({
+                        kind: 'rule',
+                        ruleId: rule.id,
+                        initial: {
+                          startHour: String(rule.startHour),
+                          startMinute: String(rule.startMinute).padStart(2, '0'),
+                          startPeriod: rule.startPeriod,
+                          endHour: String(rule.endHour),
+                          endMinute: String(rule.endMinute).padStart(2, '0'),
+                          endPeriod: rule.endPeriod,
+                          mode: rule.mode,
+                          location: rule.location,
+                        },
+                      })
+                    }
+                  >
+                    <Ionicons name="create-outline" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert(
+                        'Delete this weekly schedule?',
+                        `Are you sure you want to delete your weekly schedule (${formatDaysLabel(rule.daysOfWeek)}, ${formatRuleTimeLabel(rule)})? All its upcoming slots will be removed. Slots that already have appointments will be kept as one-time slots.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Yes, Delete', style: 'destructive', onPress: () => onDeleteRecurringRule?.(rule.id) },
+                        ]
+                      )
+                    }
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
               </View>
             ))}
           </>
@@ -244,11 +289,32 @@ export default function FacultyAvailabilityScreen({
                     />
                     <Text style={styles.locationText}>{slot.location}</Text>
                   </View>
-                  {!slot.enabled && (
-                    <TouchableOpacity onPress={() => onDeleteTimeSlot?.(selectedDay.dateKey, slot.id)}>
-                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  <View style={styles.iconGroup}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const initial = valuesFromLabel(slot.label, slot.mode, slot.location);
+                        if (initial) setEditTarget({ kind: 'slot', dateKey: selectedDay.dateKey, slotId: slot.id, initial });
+                      }}
+                    >
+                      <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
-                  )}
+                    {!slot.enabled && (
+                      <TouchableOpacity
+                        onPress={() =>
+                          Alert.alert(
+                            'Delete this time slot?',
+                            `Are you sure you want to delete the ${slot.label} slot on ${selectedDay.fullLabel}? This can't be undone.`,
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Yes, Delete', style: 'destructive', onPress: () => onDeleteTimeSlot?.(selectedDay.dateKey, slot.id) },
+                            ]
+                          )
+                        }
+                      >
+                        <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               </View>
             </View>
@@ -284,6 +350,31 @@ export default function FacultyAvailabilityScreen({
         </TouchableOpacity>
       </View>
 
+
+      <EditScheduleModal
+        visible={!!editTarget}
+        title={editTarget?.kind === 'rule' ? 'Edit Weekly Schedule' : 'Edit Time Slot'}
+        note={
+          editTarget?.kind === 'rule'
+            ? 'Changes apply to this schedule\'s upcoming slots that have no booked appointment. Booked slots keep their current details.'
+            : 'Changes apply to this slot only. Slots with a booked appointment can\'t be edited.'
+        }
+        confirmMessage={
+          editTarget?.kind === 'rule'
+            ? 'Are you sure you want to apply these changes to all upcoming unbooked slots in this weekly schedule?'
+            : 'Are you sure you want to save the changes to this time slot?'
+        }
+        initial={editTarget?.initial ?? null}
+        onClose={() => setEditTarget(null)}
+        onSave={async (values) => {
+          if (!editTarget) return 'Nothing to save.';
+          const result =
+            editTarget.kind === 'rule'
+              ? await onEditRecurringRule?.(editTarget.ruleId, values)
+              : await onEditTimeSlot?.(editTarget.dateKey, editTarget.slotId, values);
+          return result === undefined ? 'Editing is not available right now.' : result;
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -361,6 +452,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
+  iconGroup: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   ruleTextWrap: { flex: 1 },
   ruleDays: { fontSize: 13, fontWeight: '700', color: colors.textDark, marginBottom: 2 },
   ruleDetail: { fontSize: 11, color: colors.textMuted, marginTop: 1 },

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -353,7 +354,16 @@ export default function FacultyDirectoryScreen({
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.actionButton, styles.actionButtonDanger]}
-                      onPress={() => onDeclinePress?.(item)}
+                      onPress={() =>
+                        Alert.alert(
+                          'Decline this appointment?',
+                          `Are you sure you want to decline ${item.studentName}'s appointment on ${item.date}, ${item.time}? The student will be notified.`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Yes, Decline', style: 'destructive', onPress: () => onDeclinePress?.(item) },
+                          ]
+                        )
+                      }
                     >
                       <Text style={styles.actionButtonDangerText}>Decline</Text>
                     </TouchableOpacity>

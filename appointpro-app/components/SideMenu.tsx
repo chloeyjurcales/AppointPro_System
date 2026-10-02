@@ -44,7 +44,6 @@ const STUDENT_ITEMS: MenuItem[] = [
   { key: 'home', label: 'Home', icon: 'home-outline' },
   { key: 'appointments', label: 'Appointments', icon: 'calendar-outline' },
   { key: 'directory', label: 'Directory', icon: 'grid-outline' },
-  { key: 'notifications', label: 'Notifications', icon: 'notifications-outline' },
   { key: 'profile', label: 'Profile', icon: 'person-outline' },
 ];
 
@@ -52,7 +51,6 @@ const FACULTY_ITEMS: MenuItem[] = [
   { key: 'facultyHome', label: 'Home', icon: 'home-outline' },
   { key: 'facultyAvailability', label: 'Availability', icon: 'grid-outline' },
   { key: 'facultyDirectory', label: 'Appointments', icon: 'calendar-outline' },
-  { key: 'facultyNotifications', label: 'Notifications', icon: 'notifications-outline' },
   { key: 'facultyProfileMenu', label: 'Profile', icon: 'person-outline' },
 ];
 

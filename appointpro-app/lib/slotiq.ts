@@ -27,6 +27,8 @@ export type SlotIQOptions = {
   consultationDurationMinutes: number;
   preferredMode: 'Face-to-Face' | 'Online';
   preferredLocation: string;
+  // Suggestions per day: SlotIQ aims for min..max and never exceeds max.
+  minSlotsPerDay: number;
   maxSlotsPerDay: number;
   classSchedule: ClassScheduleBlock[];
   // Days the faculty accepts consultations (0 = Sunday ... 6 = Saturday).

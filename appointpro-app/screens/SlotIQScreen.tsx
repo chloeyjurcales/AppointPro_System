@@ -71,6 +71,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const today = useMemo(() => toDateKey(new Date()), []);
   const [semesterEndDate, setSemesterEndDate] = useState(toDateKey(addMonths(new Date(), 4)));
   const [duration, setDuration] = useState('30');
+  const [minSlotsPerDay, setMinSlotsPerDay] = useState('2');
   const [maxSlotsPerDay, setMaxSlotsPerDay] = useState('4');
   const [mode, setMode] = useState<'Face-to-Face' | 'Online'>('Face-to-Face');
   const [location, setLocation] = useState('');
@@ -135,6 +136,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const requestGenerate = () => {
     const end = parseDateInput(semesterEndDate);
     const minutes = Number(duration);
+    const minPerDay = Number(minSlotsPerDay);
     const maxPerDay = Number(maxSlotsPerDay);
 
     if (parsedWindow.error || !parsedWindow.range) {
@@ -171,8 +173,16 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
       Alert.alert('Invalid duration', 'Consultation duration must be between 15 and 180 minutes.');
       return;
     }
+    if (!Number.isInteger(minPerDay) || minPerDay < 1 || minPerDay > 12) {
+      Alert.alert('Invalid minimum', 'The minimum suggestions per day must be a whole number from 1 to 12.');
+      return;
+    }
     if (!Number.isInteger(maxPerDay) || maxPerDay < 1 || maxPerDay > 12) {
-      Alert.alert('Invalid daily limit', 'Choose between 1 and 12 suggested slots per day.');
+      Alert.alert('Invalid maximum', 'The maximum suggestions per day must be a whole number from 1 to 12.');
+      return;
+    }
+    if (minPerDay > maxPerDay) {
+      Alert.alert('Check your limits', 'The minimum suggestions per day cannot be higher than the maximum.');
       return;
     }
     if (!location.trim()) {
@@ -194,6 +204,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
       consultationDurationMinutes: minutes,
       preferredMode: mode,
       preferredLocation: location.trim(),
+      minSlotsPerDay: minPerDay,
       maxSlotsPerDay: maxPerDay,
       classSchedule,
       availableDays: activeDays.map((item) => item.day),
@@ -376,13 +387,28 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
             style={styles.input}
           />
 
-          <Text style={styles.label}>Maximum suggested slots per day</Text>
-          <TextInput
-            value={maxSlotsPerDay}
-            onChangeText={setMaxSlotsPerDay}
-            keyboardType="number-pad"
-            style={styles.input}
-          />
+          <Text style={styles.label}>Suggested slots per day</Text>
+          <View style={styles.limitRow}>
+            <View style={styles.limitCol}>
+              <Text style={styles.limitLabel}>Minimum</Text>
+              <TextInput
+                value={minSlotsPerDay}
+                onChangeText={setMinSlotsPerDay}
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.limitCol}>
+              <Text style={styles.limitLabel}>Maximum</Text>
+              <TextInput
+                value={maxSlotsPerDay}
+                onChangeText={setMaxSlotsPerDay}
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+            </View>
+          </View>
+          <Text style={styles.hint}>SlotIQ aims for this many suggestions on each day, as far as your free time allows.</Text>
 
           <Text style={styles.label}>Consultation mode</Text>
           <View style={styles.choiceRow}>
@@ -425,7 +451,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
               <View style={styles.emptyCard}>
                 <Ionicons name="calendar-clear-outline" size={30} color={colors.textMuted} />
                 <Text style={styles.emptyTitle}>No compatible schedule found</Text>
-                <Text style={styles.emptyText}>Try a shorter consultation duration, wider consultation hours, or a larger daily limit.</Text>
+                <Text style={styles.emptyText}>Try a shorter consultation duration, wider consultation hours, or more consultation days.</Text>
               </View>
             ) : (
               result.suggestions.map((suggestion, index) => (
@@ -493,7 +519,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
             {pendingOptions && (
               <Text style={styles.modalMeta}>
-                {pendingOptions.consultationDurationMinutes}-min slots · up to {pendingOptions.maxSlotsPerDay} per day · {pendingOptions.preferredMode} ({pendingOptions.preferredLocation}){'\n'}Consultation hours: {formatTime(pendingOptions.windowStart)} - {formatTime(pendingOptions.windowEnd)}
+                {pendingOptions.consultationDurationMinutes}-min slots · {pendingOptions.minSlotsPerDay}-{pendingOptions.maxSlotsPerDay} suggestions per day · {pendingOptions.preferredMode} ({pendingOptions.preferredLocation}){'\n'}Consultation hours: {formatTime(pendingOptions.windowStart)} - {formatTime(pendingOptions.windowEnd)}
               </Text>
             )}
 
@@ -532,6 +558,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '700', color: colors.textDark, marginTop: 13, marginBottom: 7 },
   firstLabel: { marginTop: 0 },
   dayDivider: { marginTop: 2 },
+  limitRow: { flexDirection: 'row', gap: 12 },
+  limitCol: { flex: 1 },
+  limitLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 4 },
   input: { height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, color: colors.textDark, backgroundColor: colors.white },
   inputError: { borderColor: colors.danger },
   errorText: { marginTop: 5, fontSize: 11, color: colors.danger },

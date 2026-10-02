@@ -64,7 +64,7 @@ const FALLBACK_SCHEDULE: ScheduleItem[] = [
 ];
 
 export default function FacultyHomeScreen({
-  facultyFirstName = 'Dr. Juan',
+  facultyFirstName = 'Juan',
   appointmentsCount = 8,
   pendingReschedulesCount = 2,
   walkInQueueCount = 6,
@@ -84,29 +84,8 @@ export default function FacultyHomeScreen({
   onOpenSlotIQAI,
   onTabChange,
 }: FacultyHomeScreenProps) {
-  // SlotIQ AI isn't built yet — pressing it shows a brief "not available"
-  // toast instead of navigating anywhere.
-  const [showSlotIQNotice, setShowSlotIQNotice] = useState(false);
-  const slotIQNoticeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (slotIQNoticeTimeout.current) clearTimeout(slotIQNoticeTimeout.current);
-    };
-  }, []);
-
-  const handleSlotIQPress = () => {
-    setShowSlotIQNotice(true);
-    if (slotIQNoticeTimeout.current) clearTimeout(slotIQNoticeTimeout.current);
-    slotIQNoticeTimeout.current = setTimeout(() => setShowSlotIQNotice(false), 2500);
-    onOpenSlotIQAI?.();
-  };
-
   const quickActions: QuickAction[] = [
-    { key: 'appointments', label: 'Appointments', icon: 'calendar-outline', background: '#5B7FDE', onPress: onOpenAppointments },
-    { key: 'availability', label: 'Availability', icon: 'checkmark-circle-outline', background: '#3FB68A', onPress: onOpenAvailability },
-    { key: 'queue', label: 'Queue', icon: 'notifications-outline', background: '#F0C93A', onPress: onOpenWalkInQueue },
-    { key: 'slotiq', label: 'SlotIQ AI', icon: 'sparkles-outline', background: '#9B5DE5', onPress: handleSlotIQPress },
+    { key: 'slotiq', label: 'SlotIQ AI', icon: 'sparkles-outline', background: '#9B5DE5', onPress: onOpenSlotIQAI },
   ];
 
   return (
@@ -222,8 +201,6 @@ export default function FacultyHomeScreen({
           )}
         </View>
 
-        <Text style={[styles.sectionTitle, styles.quickActionsTitle]}>Quick Actions</Text>
-
         <View style={styles.quickActionsCard}>
           <View style={styles.quickActionsRow}>
             {quickActions.map((action) => (
@@ -243,14 +220,6 @@ export default function FacultyHomeScreen({
         </View>
       </ScrollView>
 
-
-      {showSlotIQNotice && (
-        <View style={styles.toastWrap} pointerEvents="none">
-          <View style={styles.toast}>
-            <Text style={styles.toastText}>Currently not available</Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -454,6 +423,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   quickActionsCard: {
+    marginTop: spacing.lg,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,

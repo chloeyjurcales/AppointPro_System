@@ -36,6 +36,9 @@ type Body = {
   consultationDurationMinutes: number;
   preferredMode: 'Face-to-Face' | 'Online';
   preferredLocation: string;
+  // Suggestions per day: aim for min..max, never exceed max. Optional so older
+  // app versions that only send maxSlotsPerDay keep working.
+  minSlotsPerDay?: number;
   maxSlotsPerDay: number;
   // Times the faculty is TEACHING (busy), e.g. Monday 07:00:00 - 09:00:00.
   classSchedule: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
@@ -224,6 +227,10 @@ Deno.serve(async (req) => {
       !Number.isInteger(body.maxSlotsPerDay) ||
       body.maxSlotsPerDay < 1 ||
       body.maxSlotsPerDay > 12 ||
+      (body.minSlotsPerDay !== undefined &&
+        (!Number.isInteger(body.minSlotsPerDay) ||
+          body.minSlotsPerDay < 1 ||
+          body.minSlotsPerDay > body.maxSlotsPerDay)) ||
       typeof body.preferredLocation !== 'string' ||
       !body.preferredLocation.trim()
     ) {
@@ -231,6 +238,7 @@ Deno.serve(async (req) => {
     }
 
     const preferredLocation = body.preferredLocation.trim();
+    const minSlots = body.minSlotsPerDay ?? 1;
 
     // The class schedule the faculty typed in: the times they are TEACHING and
     // therefore NOT available for consultations.
@@ -308,7 +316,7 @@ Deno.serve(async (req) => {
     if (appointmentsRes.error) throw new Error(appointmentsRes.error.message || 'Could not load appointments.');
     const appointments = appointmentsRes.data ?? [];
 
-    const prompt = `You are SlotIQ, an AI scheduling assistant inside AppointPro, a faculty-student consultation booking system in the Philippines.\n\nGenerate a practical recurring weekly consultation schedule for the faculty member. The schedule will be used for the whole semester after the faculty approves it.\n\nThe faculty member entered their CLASS SCHEDULE: the times they are teaching and cannot hold consultations. Consultations must be placed in the free gaps between and around their classes.\n\nHard rules:\n1. Never place a consultation block that overlaps any class in the class schedule below, on any day.\n2. Only use times completely inside the free blocks listed below (the consultation window minus the classes). Never invent availability.\n3. Only suggest the days that appear in the free blocks.\n4. Each suggested block must be exactly ${body.consultationDurationMinutes} minutes.\n5. Do not exceed ${body.maxSlotsPerDay} suggested blocks on a day.\n6. Prefer the requested mode and location: ${body.preferredMode}, ${preferredLocation}.\n7. Avoid times that conflict with the faculty's existing appointments where possible.\n8. Return recurring weekly patterns, not individual calendar dates.\n9. Keep the number of suggestions practical; do not fill every possible minute.\n10. Use 24-hour HH:MM:SS times.\n11. The faculty will review the suggestions before saving them.\n\nSemester: ${today} through ${body.semesterEndDate}.\n\nFaculty class schedule (busy, NOT available):\n${JSON.stringify(classSchedule)}\n\nFree blocks for consultations (consultation window ${body.windowStart}-${body.windowEnd} minus classes):\n${JSON.stringify(officeHours)}\n\nExisting appointments:\n${JSON.stringify(appointments.slice(0, 500))}\n\nDay numbers: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday.\n\nExplain briefly why the suggested patterns fit around the faculty's classes and existing appointments.`;
+    const prompt = `You are SlotIQ, an AI scheduling assistant inside AppointPro, a faculty-student consultation booking system in the Philippines.\n\nGenerate a practical recurring weekly consultation schedule for the faculty member. The schedule will be used for the whole semester after the faculty approves it.\n\nThe faculty member entered their CLASS SCHEDULE: the times they are teaching and cannot hold consultations. Consultations must be placed in the free gaps between and around their classes.\n\nHard rules:\n1. Never place a consultation block that overlaps any class in the class schedule below, on any day.\n2. Only use times completely inside the free blocks listed below (the consultation window minus the classes). Never invent availability.\n3. Only suggest the days that appear in the free blocks.\n4. Each suggested block must be exactly ${body.consultationDurationMinutes} minutes.\n5. On each available day, suggest between ${minSlots} and ${body.maxSlotsPerDay} blocks. Never exceed ${body.maxSlotsPerDay} on a day; suggest fewer than ${minSlots} only if the free time cannot fit that many.\n6. Prefer the requested mode and location: ${body.preferredMode}, ${preferredLocation}.\n7. Avoid times that conflict with the faculty's existing appointments where possible.\n8. Return recurring weekly patterns, not individual calendar dates.\n9. Keep the number of suggestions practical; do not fill every possible minute.\n10. Use 24-hour HH:MM:SS times.\n11. The faculty will review the suggestions before saving them.\n\nSemester: ${today} through ${body.semesterEndDate}.\n\nFaculty class schedule (busy, NOT available):\n${JSON.stringify(classSchedule)}\n\nFree blocks for consultations (consultation window ${body.windowStart}-${body.windowEnd} minus classes):\n${JSON.stringify(officeHours)}\n\nExisting appointments:\n${JSON.stringify(appointments.slice(0, 500))}\n\nDay numbers: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday.\n\nExplain briefly why the suggested patterns fit around the faculty's classes and existing appointments.`;
 
     const result = await callGemini(geminiApiKey, prompt);
     if (!result.ok) {
@@ -380,10 +388,43 @@ Deno.serve(async (req) => {
       days.forEach((day) => perDay.set(day, (perDay.get(day) ?? 0) + 1));
     }
 
+    // Top up: if a day ended up with fewer than the minimum, add single-day
+    // slots from that day's free blocks (never overlapping an accepted slot).
+    let added = 0;
+    for (const day of availableDays) {
+      if ((perDay.get(day) ?? 0) >= minSlots) continue;
+      const dayBlocks = officeHours.filter((office) => office.days_of_week.includes(day));
+      for (const block of dayBlocks) {
+        let start = minutes(block.start_time);
+        const blockEnd = minutes(block.end_time);
+        while (start + body.consultationDurationMinutes <= blockEnd && (perDay.get(day) ?? 0) < minSlots) {
+          const startTime = toTime(start);
+          const endTime = toTime(start + body.consultationDurationMinutes);
+          const taken = accepted.some(
+            (other) => other.daysOfWeek.includes(day) && overlaps(startTime, endTime, other.startTime, other.endTime),
+          );
+          if (!taken) {
+            accepted.push({
+              daysOfWeek: [day],
+              startTime,
+              endTime,
+              mode: body.preferredMode,
+              location: preferredLocation,
+              reason: `Added to reach your minimum of ${minSlots} suggestion${minSlots === 1 ? '' : 's'} per day.`,
+            });
+            perDay.set(day, (perDay.get(day) ?? 0) + 1);
+            added++;
+          }
+          start += body.consultationDurationMinutes;
+        }
+      }
+    }
+
     return json({
       summary:
-        parsed.summary ||
-        `SlotIQ generated ${accepted.length} recurring schedule suggestion${accepted.length === 1 ? '' : 's'}.`,
+        (parsed.summary ||
+        `SlotIQ generated ${accepted.length} recurring schedule suggestion${accepted.length === 1 ? '' : 's'}.`) +
+        (added > 0 ? ` SlotIQ also added ${added} slot${added === 1 ? '' : 's'} to reach your minimum of ${minSlots} per day.` : ''),
       suggestions: accepted.map((suggestion) => ({
         ...suggestion,
         daysOfWeek: [...suggestion.daysOfWeek].sort((a, b) => a - b),

@@ -107,8 +107,8 @@ export type DbQueueEntry = {
   position: number;
   created_at: string;
   appointments:
-    | { date: string; start_time: string; end_time: string; students?: { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null } | { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null }[] | null }
-    | { date: string; start_time: string; end_time: string; students?: { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null } | { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null }[] | null }[]
+    | { date: string; start_time: string; end_time: string; status?: string; students?: { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null } | { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null }[] | null }
+    | { date: string; start_time: string; end_time: string; status?: string; students?: { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null } | { profiles?: { avatar_url?: string | null } | { avatar_url?: string | null }[] | null }[] | null }[]
     | null;
 
 };

@@ -28,6 +28,7 @@ import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import * as Linking from 'expo-linking';
 import SettingsScreen from './screens/SettingsScreen';
 import FacultyFab from './components/FacultyFab';
+import { EditableScheduleValues } from './components/EditScheduleModal';
 import AccountTypeScreen from './screens/AccountTypeScreen';
 import StudentSignUpScreen from './screens/StudentSignUpScreen';
 import FacultySignUpScreen from './screens/FacultySignUpScreen';
@@ -1321,7 +1322,7 @@ function AppContent() {
     const loadQueue = () => {
       supabase
         .from('queue_entries')
-        .select('*, appointments ( date, start_time, end_time, students ( profiles ( avatar_url ) ) )')
+        .select('*, appointments ( date, start_time, end_time, status, students ( profiles ( avatar_url ) ) )')
         .eq('faculty_id', queueFacultyId)
         .eq('queue_date', today)
         .order('position', { ascending: true })
@@ -1331,11 +1332,32 @@ function AppContent() {
             console.log('Failed to load queue:', error.message);
             return;
           }
+          // A queue spot only makes sense for a live (upcoming) appointment.
+          // Entries whose appointment was cancelled, declined or completed are
+          // hidden here, and the owning faculty's client also deletes them
+          // (students can't delete queue rows because of RLS, so a student's
+          // cancel used to leave the spot behind in the faculty's queue).
+          const rows = data as DbQueueEntry[];
+          const isStale = (row: DbQueueEntry) => {
+            const linked = Array.isArray(row.appointments) ? row.appointments[0] : row.appointments;
+            return !!linked?.status && linked.status !== 'upcoming';
+          };
+          const staleRows = rows.filter(isStale);
+          if (staleRows.length && session && queueFacultyId === session.user.id) {
+            supabase
+              .from('queue_entries')
+              .delete()
+              .in('id', staleRows.map((row) => row.id))
+              .then(({ error: cleanupError }) => {
+                if (cleanupError) console.log('Failed to clean stale queue entries:', cleanupError.message);
+              });
+          }
+
           // The DB's `position` column just reflects insertion order —
           // re-sort by each entry's actual scheduled appointment time so
           // the person booked earliest is always first in line.
           setQueue(
-            sortQueueByScheduledTime((data as DbQueueEntry[]).map(mapDbQueueEntry))
+            sortQueueByScheduledTime(rows.filter((row) => !isStale(row)).map(mapDbQueueEntry))
           );
         });
     };
@@ -2356,6 +2378,174 @@ function AppContent() {
     if (failed) showToast('Could not fully delete the recurring schedule.');
     else if (referenced.size) {
       showToast(`${referenced.size} slot(s) with appointments were kept as one-time slots.`);
+    }
+  };
+
+  // --- Editing saved availability (time / mode / location or link) ---
+  // A slot counts as "booked" while it has any appointment that isn't
+  // cancelled or completed. Booked slots are never edited, so a student's
+  // confirmed appointment can't change underneath them.
+  const findBookedSlotIds = async (slotIds: string[]): Promise<Set<string>> => {
+    const booked = new Set<string>();
+    for (let i = 0; i < slotIds.length; i += 50) {
+      const chunk = slotIds.slice(i, i + 50);
+      const { data, error } = await supabase.from('appointments').select('slot_id,status').in('slot_id', chunk);
+      if (error) throw new Error(error.message || 'Could not check existing appointments.');
+      ((data ?? []) as { slot_id: string | null; status: string }[]).forEach((a) => {
+        if (a.slot_id && !['canceled', 'cancelled', 'completed'].includes(a.status)) booked.add(a.slot_id);
+      });
+    }
+    return booked;
+  };
+
+  const handleEditFacultySlot = async (
+    dateKey: string,
+    slotId: string,
+    values: EditableScheduleValues
+  ): Promise<string | null> => {
+    if (!session) return 'You are signed out. Please log in again.';
+    const startTime = to24hTime(values.startHour, values.startMinute, values.startPeriod);
+    const endTime = to24hTime(values.endHour, values.endMinute, values.endPeriod);
+    if (endTime <= startTime) {
+      return 'End time must be after the start time.';
+    }
+
+    const overlapsOther = (facultySlotsByDate[dateKey] ?? []).some((s) => {
+      if (s.id === slotId) return false;
+      const [a, b] = s.label.split(' - ');
+      return timeRangesOverlap(labelTo24h(a), labelTo24h(b), startTime, endTime);
+    });
+    if (overlapsOther) {
+      return 'That time overlaps another slot on this day.';
+    }
+
+    try {
+      const booked = await findBookedSlotIds([slotId]);
+      if (booked.has(slotId)) {
+        return 'This slot has a booked appointment, so it can\'t be edited. Turn it off or cancel the appointment first.';
+      }
+    } catch (e) {
+      return (e as Error).message;
+    }
+
+    const { data: updated, error } = await supabase
+      .from('availability_slots')
+      .update({
+        start_time: startTime,
+        end_time: endTime,
+        mode: values.mode,
+        location: values.location,
+        total_minutes: minutesBetween(startTime, endTime),
+      })
+      .eq('id', slotId)
+      .select()
+      .maybeSingle();
+
+    if (error || !updated) {
+      return error?.message ?? 'Could not update the slot. Please try again.';
+    }
+
+    const mapped = mapAvailabilitySlotRow(updated as AvailabilitySlotRow);
+    setFacultySlotsByDate((prev) => ({
+      ...prev,
+      [dateKey]: (prev[dateKey] ?? []).map((s) => (s.id === slotId ? mapped : s)),
+    }));
+    showToast('Time slot updated.');
+    return null;
+  };
+
+  const handleEditRecurringRule = async (
+    ruleId: string,
+    values: EditableScheduleValues
+  ): Promise<string | null> => {
+    if (!session) return 'You are signed out. Please log in again.';
+    const startTime = to24hTime(values.startHour, values.startMinute, values.startPeriod);
+    const endTime = to24hTime(values.endHour, values.endMinute, values.endPeriod);
+    if (endTime <= startTime) {
+      return 'End time must be after the start time.';
+    }
+    const totalMinutes = minutesBetween(startTime, endTime);
+    const todayKey = toDateKey(new Date());
+
+    try {
+      // Upcoming slots generated by this schedule.
+      const { data: ruleSlots, error: listError } = await supabase
+        .from('availability_slots')
+        .select('id,date')
+        .eq('rule_id', ruleId)
+        .gte('date', todayKey);
+      if (listError) throw new Error(listError.message || 'Could not load this schedule\'s slots.');
+      const upcoming = (ruleSlots ?? []) as { id: string; date: string }[];
+
+      // Slots with a live appointment keep their current time/location.
+      const booked = await findBookedSlotIds(upcoming.map((r) => r.id));
+      const editable = upcoming.filter((r) => !booked.has(r.id));
+      const editableIds = new Set(editable.map((r) => r.id));
+
+      // The new time must not collide with any OTHER slot on those dates.
+      const conflictDates = editable
+        .filter((row) =>
+          (facultySlotsByDate[row.date] ?? []).some((s) => {
+            if (editableIds.has(s.id)) return false;
+            const [a, b] = s.label.split(' - ');
+            return timeRangesOverlap(labelTo24h(a), labelTo24h(b), startTime, endTime);
+          })
+        )
+        .map((row) => row.date)
+        .sort();
+      if (conflictDates.length) {
+        const first = new Date(conflictDates[0] + 'T00:00:00').toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        });
+        return `That time overlaps other slots on ${conflictDates.length} date${conflictDates.length === 1 ? '' : 's'} (e.g. ${first}). Choose a different time.`;
+      }
+
+      // Update the schedule itself (this is what future generation uses).
+      const { data: updatedRule, error: ruleError } = await supabase
+        .from('recurring_rules')
+        .update({
+          start_time: startTime,
+          end_time: endTime,
+          mode: values.mode,
+          location: values.location,
+        })
+        .eq('id', ruleId)
+        .select()
+        .maybeSingle();
+      if (ruleError || !updatedRule) {
+        throw new Error(
+          ruleError?.message ?? 'Could not update the weekly schedule. Your account may not be allowed to edit it.'
+        );
+      }
+
+      // Then every upcoming unbooked slot.
+      const ids = editable.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += 50) {
+        const { error: slotsError } = await supabase
+          .from('availability_slots')
+          .update({
+            start_time: startTime,
+            end_time: endTime,
+            mode: values.mode,
+            location: values.location,
+            total_minutes: totalMinutes,
+          })
+          .in('id', ids.slice(i, i + 50));
+        if (slotsError) throw new Error('The schedule was updated, but some slots could not be changed.');
+      }
+
+      await reloadFacultyAvailability();
+      showToast(
+        booked.size
+          ? `Schedule updated for ${editable.length} slot${editable.length === 1 ? '' : 's'}. ${booked.size} booked slot${booked.size === 1 ? '' : 's'} kept their current details.`
+          : `Schedule updated for ${editable.length} upcoming slot${editable.length === 1 ? '' : 's'}.`
+      );
+      return null;
+    } catch (e) {
+      await reloadFacultyAvailability();
+      return (e as Error).message || 'Could not update the weekly schedule.';
     }
   };
 
@@ -3763,11 +3953,9 @@ function AppContent() {
         {screen === 'facultyHome' && (
           <FacultyHomeScreen
             facultyFirstName={(() => {
-              // Keep a title the user typed ("Prof. Maria Santos"); otherwise assume "Dr.".
-              const m = facultyProfile.name.trim().match(/^(dr|prof|engr|mr|ms|mrs)\.?\s+(\S+)/i);
-              if (m) return `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}. ${m[2]}`;
-              const first = facultyProfile.name.trim().split(/\s+/)[0];
-              return first ? `Dr. ${first}` : undefined;
+              // First name only: drop any title the user typed ("Dr. Juan Dela Cruz" -> "Juan").
+              const withoutTitle = facultyProfile.name.trim().replace(/^(dr|prof|engr|mr|ms|mrs)\.?\s+/i, '');
+              return withoutTitle.split(/\s+/)[0] || undefined;
             })()}
             appointmentsCount={todaysFacultyAppointments.length}
             // No feature tracks student-initiated reschedule requests yet
@@ -3845,6 +4033,8 @@ function AppContent() {
             onSetRecurringSchedule={() => setScreen('recurringSchedule')}
             onSlotIQPress={handleOpenSlotIQ}
             onDeleteRecurringRule={handleDeleteRecurringRule}
+            onEditTimeSlot={handleEditFacultySlot}
+            onEditRecurringRule={handleEditRecurringRule}
             onSaveAvailability={() => {
               console.log('Save availability:', facultySlotsByDate);
               setScreen('facultyHome');
