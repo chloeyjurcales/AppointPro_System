@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import EditScheduleModal, { EditableScheduleValues, valuesFromLabel } from '../components/EditScheduleModal';
 import {
   FacultySlot,
@@ -375,6 +375,8 @@ export default function FacultyAvailabilityScreen({
           return result === undefined ? 'Editing is not available right now.' : result;
         }}
       />
+
+      <FacultyBottomTabBar active="appointment" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

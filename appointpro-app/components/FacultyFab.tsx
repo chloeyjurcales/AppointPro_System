@@ -1,31 +1,12 @@
-import React, { useRef, useState } from 'react';
-import {
-  Animated,
-  Modal,
-  PanResponder,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import React, { useState } from 'react';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing } from '../theme';
 import AnimatedPressable from './AnimatedPressable';
 
 const FAB_SIZE = 58;
-const EDGE_GAP = 8;
 const RIGHT_GAP = spacing.lg;
-// A touch that moves less than this many pixels counts as a tap, not a drag.
-const TAP_SLOP = 6;
-
-// Remembered while the app is running so the button stays where the faculty
-// dragged it when moving between screens. Offsets are relative to the default
-// bottom-right spot. `moved` is false until the faculty drags it once.
-const savedPosition = { x: 0, y: 0, moved: false };
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 type FacultyFabProps = {
   /** Extra space above the bottom edge, e.g. to clear a footer button. */
@@ -45,7 +26,7 @@ type Action = {
 
 /**
  * Floating "+" button (a "+" inside a circle) shown on the faculty screens.
- * It can be dragged anywhere on screen. Tapping it opens a small sheet asking how the faculty wants to create or set
+ * Tapping it opens a small sheet asking how the faculty wants to create or set
  * their availability / consultation schedule.
  */
 export default function FacultyFab({
@@ -55,58 +36,10 @@ export default function FacultyFab({
   onOpenSlotIQ,
 }: FacultyFabProps) {
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
   const [open, setOpen] = useState(false);
 
-  // Default spot: bottom-right. The drag offsets below are relative to it.
-  const baseBottom = Math.max(insets.bottom, 12) + spacing.md;
-
-  // Furthest the button may travel from its default spot, keeping it on screen.
-  const bounds = {
-    minX: -(width - RIGHT_GAP - FAB_SIZE - EDGE_GAP),
-    maxX: RIGHT_GAP - EDGE_GAP,
-    minY: -(height - baseBottom - FAB_SIZE - insets.top - EDGE_GAP),
-    maxY: baseBottom - insets.bottom - EDGE_GAP,
-  };
-  const boundsRef = useRef(bounds);
-  boundsRef.current = bounds;
-
-  const openRef = useRef(() => setOpen(true));
-
-  // Until it has been dragged, sit above any pinned footer (bottomOffset).
-  const startY = savedPosition.moved ? savedPosition.y : -bottomOffset;
-  const position = useRef({ x: savedPosition.x, y: startY });
-  const pan = useRef(new Animated.ValueXY({ x: position.current.x, y: position.current.y })).current;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderMove: (_, g) => {
-        const b = boundsRef.current;
-        pan.setValue({
-          x: clamp(position.current.x + g.dx, b.minX, b.maxX),
-          y: clamp(position.current.y + g.dy, b.minY, b.maxY),
-        });
-      },
-      onPanResponderRelease: (_, g) => {
-        const b = boundsRef.current;
-        const isTap = Math.abs(g.dx) < TAP_SLOP && Math.abs(g.dy) < TAP_SLOP;
-        if (isTap) {
-          openRef.current();
-          return;
-        }
-        position.current = {
-          x: clamp(position.current.x + g.dx, b.minX, b.maxX),
-          y: clamp(position.current.y + g.dy, b.minY, b.maxY),
-        };
-        savedPosition.x = position.current.x;
-        savedPosition.y = position.current.y;
-        savedPosition.moved = true;
-      },
-    }),
-  ).current;
+  // Fixed spot: bottom-right, above any bottom bar (bottomOffset).
+  const bottom = Math.max(insets.bottom, 12) + spacing.md + bottomOffset;
 
   const run = (fn: () => void) => () => {
     setOpen(false);
@@ -139,16 +72,16 @@ export default function FacultyFab({
 
   return (
     <>
-      <View pointerEvents="box-none" style={[styles.fabWrap, { bottom: baseBottom }]}>
-        <Animated.View
-          {...panResponder.panHandlers}
-          style={[styles.fab, { transform: pan.getTranslateTransform() }]}
-          accessible
+      <View pointerEvents="box-none" style={[styles.fabWrap, { bottom }]}>
+        <AnimatedPressable
+          style={styles.fab}
+          onPress={() => setOpen(true)}
+          scaleTo={0.9}
           accessibilityRole="button"
-          accessibilityLabel="Create or set availability schedule. Drag to move."
+          accessibilityLabel="Create or set availability schedule"
         >
           <Ionicons name="add-circle-outline" size={34} color={colors.white} />
-        </Animated.View>
+        </AnimatedPressable>
       </View>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -187,7 +120,7 @@ export default function FacultyFab({
 const styles = StyleSheet.create({
   fabWrap: {
     position: 'absolute',
-    right: spacing.lg,
+    right: RIGHT_GAP,
   },
   fab: {
     width: FAB_SIZE,

@@ -15,8 +15,6 @@ import AuthInput from '../components/AuthInput';
 
 type ResetPasswordScreenProps = {
   onCancel?: () => void;
-  // Return true when the password was changed, false when it failed
-  // (the parent shows the error itself).
   onSave?: (newPassword: string) => Promise<boolean>;
 };
 

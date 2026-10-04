@@ -74,7 +74,7 @@ export default function FacultyCancelAppointmentScreen({
           <View style={styles.warningBox}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
             <Text style={styles.warningText}>
-              The student will be notified immediately once this appointment is cancelled.
+              {studentName} will be notified immediately once this appointment is cancelled.
             </Text>
           </View>
         </ScrollView>

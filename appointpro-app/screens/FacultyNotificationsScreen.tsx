@@ -9,7 +9,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import NotificationDetailModal, { NotificationPerson } from '../components/NotificationDetailModal';
 import { NotificationItem, INITIAL_FACULTY_NOTIFICATIONS } from '../data/notifications';
 
 type FacultyNotificationsScreenProps = {
@@ -22,6 +23,8 @@ type FacultyNotificationsScreenProps = {
   onMarkAllRead?: () => void;
   onMarkAsRead?: (id: string) => void;
   onSelectNotification?: (item: NotificationItem) => void;
+  // Names + profile pictures used to show who a notification is about.
+  people?: NotificationPerson[];
   onTabChange?: (tab: FacultyTabKey) => void;
 };
 
@@ -32,10 +35,12 @@ export default function FacultyNotificationsScreen({
   onMarkAllRead,
   onMarkAsRead,
   onSelectNotification,
+  people,
   onTabChange,
 }: FacultyNotificationsScreenProps) {
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
+  const [openNotification, setOpenNotification] = useState<NotificationItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const allSelected = selectedIds.size > 0 && selectedIds.size === notifications.length;
@@ -82,6 +87,7 @@ export default function FacultyNotificationsScreen({
       toggleSelected(item.id);
     } else {
       if (!item.read) onMarkAsRead?.(item.id);
+      setOpenNotification({ ...item, read: true });
       onSelectNotification?.(item);
     }
   };
@@ -198,6 +204,9 @@ export default function FacultyNotificationsScreen({
         }
       />
 
+      <NotificationDetailModal notification={openNotification} people={people} onClose={() => setOpenNotification(null)} />
+
+      <FacultyBottomTabBar active="notifications" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

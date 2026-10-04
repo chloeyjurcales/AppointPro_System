@@ -7,6 +7,10 @@ export type NotificationItem = {
   description: string;
   time: string;
   read: boolean;
+  // Who the notification is from (set when the sender is known), so the
+  // list can show their real name and profile picture.
+  senderName?: string;
+  senderAvatarUrl?: string;
 };
 
 export const INITIAL_STUDENT_NOTIFICATIONS: NotificationItem[] = [
@@ -142,10 +146,17 @@ export type DbNotification = {
   description: string | null;
   read: boolean;
   created_at: string;
+  sender_id?: string | null;
+  // Joined from profiles when the notification was loaded with its sender.
+  sender?:
+    | { full_name: string | null; avatar_url: string | null }
+    | { full_name: string | null; avatar_url: string | null }[]
+    | null;
 };
 
 // Converts a real DB row into the shape every notification screen expects.
 export function mapDbNotification(row: DbNotification): NotificationItem {
+  const sender = Array.isArray(row.sender) ? row.sender[0] : row.sender;
   return {
     id: row.id,
     icon: (row.icon as NotificationItem['icon']) || 'notifications-outline',
@@ -153,5 +164,7 @@ export function mapDbNotification(row: DbNotification): NotificationItem {
     description: row.description ?? '',
     time: formatNotificationTimeWithDate(new Date(row.created_at)),
     read: row.read,
+    senderName: sender?.full_name ?? undefined,
+    senderAvatarUrl: sender?.avatar_url ?? undefined,
   };
 }

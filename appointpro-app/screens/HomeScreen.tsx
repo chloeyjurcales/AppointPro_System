@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { TabKey } from '../components/BottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import ProfileAvatar from '../components/ProfileAvatar';
 import {
   QueueEntry,
@@ -45,6 +45,7 @@ function getEstimatedWaitSeconds(
 
 type HomeScreenProps = {
   userName?: string;
+  photoUri?: string;
   hasPendingReschedule?: boolean;
   cancelledNotice?: string | null;
   onDismissCancelledNotice?: () => void;
@@ -71,6 +72,7 @@ type HomeScreenProps = {
 
 export default function HomeScreen({
   userName = 'there',
+  photoUri,
   hasPendingReschedule = false,
   cancelledNotice = null,
   onDismissCancelledNotice,
@@ -138,33 +140,19 @@ export default function HomeScreen({
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onMenuPress}>
-          <Ionicons name="menu" size={24} color={colors.textDark} />
-        </TouchableOpacity>
+        <ProfileAvatar
+          uri={photoUri}
+          name={userName}
+          size={44}
+          role="student"
+          style={styles.headerAvatar}
+        />
 
         <View style={styles.headerTextWrap}>
           <Text style={styles.greeting}>Hi, {userName} 👋</Text>
           <Text style={styles.greetingSub}>Good morning!</Text>
         </View>
 
-        <TouchableOpacity
-          onPress={onNotificationsPress}
-          style={styles.bellWrap}
-        >
-          <Ionicons
-            name="notifications-outline"
-            size={22}
-            color={colors.textDark}
-          />
-
-          {unreadCount > 0 && (
-            <View style={styles.bellBadge}>
-              <Text style={styles.bellBadgeText}>
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -374,6 +362,7 @@ export default function HomeScreen({
         )}
       </ScrollView>
 
+      <BottomTabBar active="home" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
@@ -389,9 +378,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
+  headerAvatar: {
+    marginRight: spacing.md,
+  },
   headerTextWrap: {
     flex: 1,
-    marginLeft: spacing.md,
   },
   greeting: {
     fontSize: 14,

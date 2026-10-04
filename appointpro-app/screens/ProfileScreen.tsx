@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { TabKey } from '../components/BottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 
 type MenuItem = {
   key: string;
@@ -30,6 +30,7 @@ type ProfileScreenProps = {
   onBack?: () => void;
   onPersonalInformation?: () => void;
   onAbout?: () => void;
+  onSettings?: () => void;
   onLogout?: () => void;
   onTabChange?: (tab: TabKey) => void;
   // Lets the student tap their avatar to pick a new photo from their
@@ -48,6 +49,7 @@ export default function ProfileScreen({
   onBack,
   onPersonalInformation,
   onAbout,
+  onSettings,
   onLogout,
   onTabChange,
   onChangePhoto,
@@ -63,6 +65,7 @@ export default function ProfileScreen({
 
   const menuItems: MenuItem[] = [
     { key: 'personal', icon: 'person-outline', label: 'Personal Information', onPress: onPersonalInformation },
+    { key: 'settings', icon: 'settings-outline', label: 'Settings', onPress: onSettings },
     { key: 'about', icon: 'information-circle-outline', label: 'About AppointmentPro', onPress: onAbout },
   ];
 
@@ -156,6 +159,7 @@ export default function ProfileScreen({
         </View>
       </ScrollView>
 
+      <BottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

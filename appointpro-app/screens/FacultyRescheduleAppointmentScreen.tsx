@@ -253,7 +253,7 @@ export default function FacultyRescheduleAppointmentScreen({
                 />
               </View>
               <Text style={styles.linkHint}>
-                This appointment moved to an online slot — the student needs a fresh
+                This appointment moved to an online slot — {studentName} needs a fresh
                 link since the old one no longer applies.
               </Text>
             </>

@@ -167,7 +167,7 @@ export default function BookingConfirmationScreen({
       <View style={styles.footer}>
         {approvalPending ? (
           <>
-            <Text style={styles.approvalFooterText}>The faculty member must approve this request before the appointment is confirmed.</Text>
+            <Text style={styles.approvalFooterText}>{doctorName} must approve this request before the appointment is confirmed.</Text>
             <TouchableOpacity
               style={styles.dangerButton}
               onPress={onCancelAppointment}

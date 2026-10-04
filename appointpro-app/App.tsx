@@ -28,6 +28,7 @@ import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import * as Linking from 'expo-linking';
 import SettingsScreen from './screens/SettingsScreen';
 import FacultyFab from './components/FacultyFab';
+import CancelReasonModal from './components/CancelReasonModal';
 import { EditableScheduleValues } from './components/EditScheduleModal';
 import AccountTypeScreen from './screens/AccountTypeScreen';
 import StudentSignUpScreen from './screens/StudentSignUpScreen';
@@ -77,7 +78,9 @@ import BookingRescheduleScreen from './screens/BookingRescheduleScreen';
 import RecurringScheduleScreen from './screens/RecurringScheduleScreen';
 import SlotIQScreen from './screens/SlotIQScreen';
 import type { SlotIQSuggestion } from './lib/slotiq';
-import SideMenu, { SideMenuKey, SideMenuRole } from './components/SideMenu';
+import { NotificationBadgeContext } from './components/NotificationBadgeContext';
+
+type UserRole = 'student' | 'faculty';
 import { TabKey } from './components/BottomTabBar';
 import { FacultyTabKey } from './components/FacultyBottomTabBar';
 import {
@@ -530,11 +533,26 @@ function directoryModeLabel(appt: StudentAppointment): string {
   return appt.mode === 'online' ? 'Online' : 'Face-to-Face';
 }
 
+// Screens that render a bottom tab bar. The tab bar lives inside each screen,
+// so fading the whole screen in on navigation made the bar blink out and back
+// in. We never fade these screens, and tab-to-tab switches don't animate.
+const SCREENS_WITH_TAB_BAR = new Set<Screen>([
+  'home', 'directory', 'appointments', 'notifications', 'profile', 'facultyProfile',
+  'queue', 'facultyHome', 'facultyDirectory', 'studentProfile', 'facultyAvailability',
+  'addTimeSlot', 'slotIQ', 'facultyNotifications', 'facultyProfileMenu', 'facultySchedule',
+]);
+
 function AppContent() {
   const [screen, setScreen] = useState<Screen>('login');
   const [previousScreen, setPreviousScreen] = useState<Screen>('profile');
-  const [userRole, setUserRole] = useState<SideMenuRole>('student');
-  const [sideMenuOpen, setSideMenuOpen] = useState(false);
+  // Where the schedule forms (Add Time Slot, Recurring Schedule, SlotIQ) were
+  // opened from, so their back arrow returns there instead of always going to
+  // the Availability screen.
+  const [scheduleFormReturn, setScheduleFormReturn] = useState<Screen>('facultyAvailability');
+  // Appointment the student is cancelling; while set, the "why are you
+  // cancelling?" pop-up is open and the AI checks the reason.
+  const [cancelReasonTarget, setCancelReasonTarget] = useState<Appointment | null>(null);
+  const [userRole, setUserRole] = useState<UserRole>('student');
 
   // Keeps unsaved Personal Information edits available even if the user
   // leaves the Personal Information screen before pressing Save Changes.
@@ -902,19 +920,29 @@ function AppContent() {
 
     let isMounted = true;
 
-    supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (!isMounted) return;
-        if (error) {
-          console.log('Failed to load notifications:', error.message);
-          return;
-        }
-        setStudentNotifications((data as DbNotification[]).map(mapDbNotification));
-      });
+    // Load with each notification's sender (name + profile picture). If the
+    // `sender_id` column hasn't been added to the database yet, fall back to
+    // the plain query so notifications still load.
+    (async () => {
+      let result = await supabase
+        .from('notifications')
+        .select('*, sender:profiles!sender_id(full_name, avatar_url)')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
+      if (result.error) {
+        result = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: false });
+      }
+      if (!isMounted) return;
+      if (result.error) {
+        console.log('Failed to load notifications:', result.error.message);
+        return;
+      }
+      setStudentNotifications((result.data as DbNotification[]).map(mapDbNotification));
+    })();
 
     const channel = supabase
       .channel(`notifications-${session.user.id}`)
@@ -927,8 +955,28 @@ function AppContent() {
           filter: `user_id=eq.${session.user.id}`,
         },
         (payload) => {
-          const newItem = mapDbNotification(payload.new as DbNotification);
+          const row = payload.new as DbNotification;
+          const newItem = mapDbNotification(row);
           setStudentNotifications((prev) => [newItem, ...prev]);
+          // The realtime payload has no joined sender, so look it up and fill
+          // the name + picture in as soon as it arrives.
+          if (row.sender_id) {
+            supabase
+              .from('profiles')
+              .select('full_name, avatar_url')
+              .eq('id', row.sender_id)
+              .maybeSingle()
+              .then(({ data: senderRow }) => {
+                if (!senderRow) return;
+                setStudentNotifications((prev) =>
+                  prev.map((n) =>
+                    n.id === newItem.id
+                      ? { ...n, senderName: senderRow.full_name ?? undefined, senderAvatarUrl: senderRow.avatar_url ?? undefined }
+                      : n
+                  )
+                );
+              });
+          }
           if (soundEnabledRef.current) {
             try {
               notificationSoundPlayer.seekTo(0);
@@ -1647,7 +1695,8 @@ function AppContent() {
       supabase
         .from('appointments')
         .select(
-          `id, student_id, date, start_time, end_time, category, purpose, mode, location, status, meeting_link, reference_no, student_approval_status, faculty_approval_status,
+          `id, student_id, slot_id, date, start_time, end_time, category, purpose, mode, location, status, meeting_link, reference_no, student_approval_status, faculty_approval_status,
+           availability_slots ( start_time, end_time ),
            students ( student_id, department, year_level, profiles ( full_name, email, avatar_url ) )`
         )
         .eq('faculty_id', facultyId)
@@ -1743,28 +1792,55 @@ function AppContent() {
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const lastScreenRef = useRef<Screen>(screen);
 
   useEffect(() => {
+    const prev = lastScreenRef.current;
+    lastScreenRef.current = screen;
+    const toHasBar = SCREENS_WITH_TAB_BAR.has(screen);
+    const fromHasBar = SCREENS_WITH_TAB_BAR.has(prev);
+
     // Stop any in-flight transition before starting the next one so rapid
     // screen switches (e.g. fast tab taps) don't fight each other or jump.
     fadeAnim.stopAnimation();
     slideAnim.stopAnimation();
-    fadeAnim.setValue(0);
+
+    // Tab bar -> tab bar: swap instantly so the bar stays put and visible.
+    if (toHasBar && fromHasBar) {
+      fadeAnim.setValue(1);
+      slideAnim.setValue(0);
+      return;
+    }
+
+    // Screens with a tab bar slide in but never fade, so the bar can't
+    // disappear (or get stuck transparent if a transition is interrupted).
+    fadeAnim.setValue(toHasBar ? 1 : 0);
     slideAnim.setValue(28);
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
+    const animations = [
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 260,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-    ]).start();
+    ];
+    if (!toHasBar) {
+      animations.push(
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 260,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
+      );
+    }
+    Animated.parallel(animations).start(({ finished }) => {
+      // If a transition was cut short, never leave the screen half-hidden.
+      if (!finished) {
+        fadeAnim.setValue(1);
+        slideAnim.setValue(0);
+      }
+    });
   }, [screen]);
 
   const handleTabChange = (tab: TabKey) => {
@@ -1822,46 +1898,6 @@ function AppContent() {
     setPreviousScreen(from);
     setScreen('about');
   };
-
-  // --- Side menu handlers ---
-  const openSideMenu = (role: SideMenuRole) => {
-    setUserRole(role);
-    setSideMenuOpen(true);
-  };
-
-  const handleSideMenuNavigate = (key: SideMenuKey) => {
-    setSideMenuOpen(false);
-    if (key === 'helpSupport') {
-      goToAbout(screen);
-      return;
-    }
-    if (key === 'settings') {
-      setPreviousScreen(screen);
-      setScreen('settings');
-      return;
-    }
-    setScreen(key);
-  };
-
-  // Maps the current app screen back to a SideMenu key so the matching
-  // row can be highlighted while the menu is open.
-  const sideMenuActiveKey: SideMenuKey | undefined = (
-    [
-      'home',
-      'directory',
-      'appointments',
-      'notifications',
-      'profile',
-      'facultyHome',
-      'facultyDirectory',
-      'facultyAvailability',
-      'facultyNotifications',
-      'facultyProfileMenu',
-      'settings',
-    ] as SideMenuKey[]
-  ).includes(screen as SideMenuKey)
-    ? (screen as SideMenuKey)
-    : undefined;
 
   const saveStudentPersonalInformation = async (
     data: PersonalInformation,
@@ -1948,7 +1984,6 @@ function AppContent() {
   // have not been saved yet, the user gets the choice to add/save them or
   // discard them before the Supabase session is ended.
   const performLogout = () => {
-    setSideMenuOpen(false);
     setStudentPersonalDraft(null);
     setFacultyPersonalDraft(null);
     setConfirmedBooking(null);
@@ -2016,7 +2051,6 @@ function AppContent() {
       ]
     );
   };
-  const handleSideMenuLogout = handleLogout;
 
   // --- Faculty availability editing handlers (one-off slots) ---
   const handleToggleFacultySlot = async (dateKey: string, slotId: string) => {
@@ -2075,9 +2109,16 @@ function AppContent() {
     }));
   };
 
+  const openScheduleForm = (target: Screen) => {
+    // Hopping between the forms themselves keeps the original return screen.
+    const isForm = screen === 'addTimeSlot' || screen === 'recurringSchedule' || screen === 'slotIQ';
+    if (!isForm) setScheduleFormReturn(screen);
+    setScreen(target);
+  };
+
   const handleAddTimeSlot = (dateKey: string) => {
     setAddSlotForDate(dateKey);
-    setScreen('addTimeSlot');
+    openScheduleForm('addTimeSlot');
   };
 
   const handleConfirmNewFacultySlot = async (data: NewFacultySlotInput) => {
@@ -2195,7 +2236,7 @@ function AppContent() {
   };
 
   const handleOpenSlotIQ = () => {
-    setScreen('slotIQ');
+    openScheduleForm('slotIQ');
   };
 
   const handleApproveSlotIQ = async (suggestions: SlotIQSuggestion[], semesterEndDate: string) => {
@@ -2645,12 +2686,20 @@ function AppContent() {
     userId: string,
     input: Pick<NotificationItem, 'icon' | 'title' | 'description'>
   ) => {
-    const { error } = await supabase.from('notifications').insert({
+    // The person doing the action is the sender, so the recipient sees their
+    // real name and profile picture. Notes to yourself have no sender.
+    const senderId = session && session.user.id !== userId ? session.user.id : null;
+    const base = {
       user_id: userId,
       icon: input.icon,
       title: input.title,
       description: input.description,
-    });
+    };
+    let { error } = await supabase.from('notifications').insert({ ...base, sender_id: senderId });
+    if (error) {
+      // `sender_id` column not added yet — save without it.
+      ({ error } = await supabase.from('notifications').insert(base));
+    }
     if (error) {
       console.log('Failed to save notification:', error.message);
     }
@@ -2873,7 +2922,7 @@ function AppContent() {
   // whatever `confirmedBooking` was (only set for a booking made in this app
   // session), so cancelling from the Appointments list did nothing after a
   // restart — or cancelled a different, freshly booked appointment.
-  const handleStudentCancel = async (appt: Appointment | null) => {
+  const handleStudentCancel = async (appt: Appointment | null, reason?: string) => {
     if (!appt || appt.status !== 'upcoming') {
       showToast('There is no upcoming appointment to cancel.');
       return;
@@ -2914,7 +2963,9 @@ function AppContent() {
         sendNotification(appt.facultyId, {
           icon: 'close-circle-outline',
           title: 'Appointment Cancelled',
-          description: `${studentProfile.name} cancelled their appointment on ${dateLabel} at ${timeLabel}.`,
+          description:
+            `${studentProfile.name} cancelled their appointment on ${dateLabel} at ${timeLabel}.` +
+            (reason ? `\n\nReason: ${reason}` : ''),
         });
       }
 
@@ -2938,6 +2989,15 @@ function AppContent() {
     } finally {
       actionInFlightRef.current = false;
     }
+  };
+
+  // Cancelling always goes through the reason pop-up first.
+  const requestStudentCancel = (appt: Appointment | null) => {
+    if (!appt || appt.status !== 'upcoming') {
+      showToast('There is no upcoming appointment to cancel.');
+      return;
+    }
+    setCancelReasonTarget(appt);
   };
 
   // --- Student-initiated reschedule ---
@@ -3360,7 +3420,7 @@ function AppContent() {
   }
 
   return (
-    <>
+    <NotificationBadgeContext.Provider value={unreadNotificationCount}>
       <Animated.View style={{ flex: 1, opacity: fadeAnim, transform: [{ translateX: slideAnim }] }}>
         {screen === 'login' && (
           <LoginScreen
@@ -3612,12 +3672,11 @@ function AppContent() {
         {screen === 'home' && (
           <HomeScreen
             userName={studentProfile.name}
+              photoUri={studentProfile.photoUri}     
             hasPendingReschedule={!!pendingReschedule}
             cancelledNotice={cancelledNotice}
             onDismissCancelledNotice={() => setCancelledNotice(null)}
             onReviewReschedule={() => setScreen('rescheduleProposal')}
-            onMenuPress={() => openSideMenu('student')}
-            onNotificationsPress={() => setScreen('notifications')}
             onViewAppointments={() => setScreen('appointments')}
             onViewNotifications={() => setScreen('notifications')}
             onViewQueue={() => {
@@ -3641,7 +3700,6 @@ function AppContent() {
           <DirectoryScreen
             faculty={facultyDirectory}
             loading={facultyDirectoryLoading}
-            onMenuPress={() => openSideMenu('student')}
             onSelectFaculty={(faculty) => {
               setSelectedFaculty(faculty);
               setScreen('facultyProfile');
@@ -3896,7 +3954,7 @@ function AppContent() {
             onBack={() => setScreen('appointments')}
             onMorePress={() => showToast('More options coming soon')}
             onReschedule={() => startStudentReschedule(selectedAppointment)}
-            onCancelAppointment={() => handleStudentCancel(selectedAppointment)}
+            onCancelAppointment={() => requestStudentCancel(selectedAppointment)}
             status={selectedAppointment?.status?.toUpperCase()}
             doctorName={selectedAppointment?.doctorName}
             department={selectedAppointment?.department}
@@ -3917,7 +3975,6 @@ function AppContent() {
         {screen === 'appointments' && (
           <AppointmentsScreen
             appointments={studentAppointments}
-            onMenuPress={() => openSideMenu('student')}
             onSelectAppointment={(appointment) => {
               setSelectedAppointmentId(appointment.id);
               setScreen('appointmentDetails');
@@ -3928,9 +3985,12 @@ function AppContent() {
 
         {screen === 'notifications' && (
           <NotificationsScreen
+            people={[
+              ...studentAppointments.map((a) => ({ name: a.doctorName, photoUri: a.facultyAvatarUrl })),
+              ...facultyDirectory.map((f) => ({ name: f.name, photoUri: f.photoUri })),
+            ]}
             notifications={studentNotifications}
             onDeleteNotifications={handleDeleteStudentNotifications}
-            onMenuPress={() => openSideMenu('student')}
             onMarkAllRead={handleMarkAllStudentNotificationsRead}
             onMarkAsRead={handleMarkStudentNotificationRead}
             onSelectNotification={(item) => console.log('Selected notification:', item)}
@@ -3944,6 +4004,10 @@ function AppContent() {
             onBack={() => setScreen('home')}
             onPersonalInformation={() => goToPersonalInformation('profile')}
             onAbout={() => goToAbout('profile')}
+            onSettings={() => {
+              setPreviousScreen('profile');
+              setScreen('settings');
+            }}
             onLogout={handleLogout}
             onTabChange={handleTabChange}
             onChangePhoto={() => handleChangeAvatar('student')}
@@ -3952,6 +4016,8 @@ function AppContent() {
 
         {screen === 'facultyHome' && (
           <FacultyHomeScreen
+          facultyFullName={facultyProfile.name}       // <-- add this line
+            photoUri={facultyProfile.photoUri} 
             facultyFirstName={(() => {
               // First name only: drop any title the user typed ("Dr. Juan Dela Cruz" -> "Juan").
               const withoutTitle = facultyProfile.name.trim().replace(/^(dr|prof|engr|mr|ms|mrs)\.?\s+/i, '');
@@ -3968,15 +4034,12 @@ function AppContent() {
             queueStartsInSeconds={facultyQueueStartsInSeconds}
             queueAppointmentTime={todaysFacultyQueueAppointment?.startTimeLabel}
             queueStudentName={todaysFacultyQueueAppointment?.studentName}
-            onMenuPress={() => openSideMenu('faculty')}
-            onNotificationsPress={() => setScreen('facultyNotifications')}
             unreadCount={unreadNotificationCount}
             onViewSchedule={() => setScreen('facultyDirectory')}
             onOpenAppointments={() => setScreen('facultyDirectory')}
             onOpenPendingReschedules={() => setScreen('facultyDirectory')}
             onOpenAvailability={() => setScreen('facultyAvailability')}
             onOpenWalkInQueue={() => setScreen('queue')}
-            onOpenSlotIQAI={handleOpenSlotIQ}
             onTabChange={handleFacultyTabChange}
           />
         )}
@@ -3998,7 +4061,6 @@ function AppContent() {
             }}
             onApprovePress={handleFacultyApprove}
             onDeclinePress={handleFacultyDecline}
-            onMenuPress={() => openSideMenu('faculty')}
             onTabChange={handleFacultyTabChange}
           />
         )}
@@ -4030,7 +4092,7 @@ function AppContent() {
             onAddTimeSlot={handleAddTimeSlot}
             onToggleSlot={handleToggleFacultySlot}
             onDeleteTimeSlot={handleDeleteFacultySlot}
-            onSetRecurringSchedule={() => setScreen('recurringSchedule')}
+            onSetRecurringSchedule={() => openScheduleForm('recurringSchedule')}
             onSlotIQPress={handleOpenSlotIQ}
             onDeleteRecurringRule={handleDeleteRecurringRule}
             onEditTimeSlot={handleEditFacultySlot}
@@ -4045,7 +4107,7 @@ function AppContent() {
 
         {screen === 'addTimeSlot' && (
           <AddTimeSlotScreen
-            onBack={() => setScreen('facultyAvailability')}
+            onBack={() => setScreen(scheduleFormReturn)}
             onConfirm={handleConfirmNewFacultySlot}
             onTabChange={handleFacultyTabChange}
           />
@@ -4053,14 +4115,14 @@ function AppContent() {
 
         {screen === 'recurringSchedule' && (
           <RecurringScheduleScreen
-            onBack={() => setScreen('facultyAvailability')}
+            onBack={() => setScreen(scheduleFormReturn)}
             onConfirm={handleCreateRecurringRule}
           />
         )}
 
         {screen === 'slotIQ' && (
           <SlotIQScreen
-            onBack={() => setScreen('facultyAvailability')}
+            onBack={() => setScreen(scheduleFormReturn)}
             onApprove={handleApproveSlotIQ}
             onTabChange={handleFacultyTabChange}
           />
@@ -4068,6 +4130,7 @@ function AppContent() {
 
         {screen === 'facultyNotifications' && (
           <FacultyNotificationsScreen
+            people={facultyAppointments.map((a) => ({ name: a.studentName, photoUri: a.photoUri }))}
             notifications={studentNotifications}
             onDeleteNotifications={handleDeleteStudentNotifications}
             onMarkAllRead={handleMarkAllStudentNotificationsRead}
@@ -4085,6 +4148,10 @@ function AppContent() {
             onPersonalInformation={() => goToFacultyPersonalInformation('facultyProfileMenu')}
             onMySchedule={() => setScreen('facultySchedule')}
             onAbout={() => goToAbout('facultyProfileMenu')}
+            onSettings={() => {
+              setPreviousScreen('facultyProfileMenu');
+              setScreen('settings');
+            }}
             onLogout={handleLogout}
             onTabChange={handleFacultyTabChange}
             onChangePhoto={() => handleChangeAvatar('faculty')}
@@ -4185,7 +4252,7 @@ function AppContent() {
               setScreen(userRole === 'faculty' ? 'facultyHome' : 'home');
             }}
             onReschedule={() => startStudentReschedule(todaysStudentAppointment ?? nextStudentAppointment)}
-            onCancelAppointment={() => handleStudentCancel(todaysStudentAppointment ?? nextStudentAppointment)}
+            onCancelAppointment={() => requestStudentCancel(todaysStudentAppointment ?? nextStudentAppointment)}
             onCompleteCurrent={handleCompleteCurrentQueue}
             onTabChange={handleTabChange}
             onFacultyTabChange={handleFacultyTabChange}
@@ -4269,36 +4336,32 @@ function AppContent() {
         )}
       </Animated.View>
 
-      {!sideMenuOpen &&
-        (screen === 'facultyHome' ||
+      {(screen === 'facultyHome' ||
           screen === 'facultyDirectory' ||
           screen === 'facultyAvailability' ||
           screen === 'facultyNotifications' ||
           screen === 'facultyProfileMenu') && (
           <FacultyFab
-            // The Availability screen has a "Save Availability" button pinned
-            // to the bottom, so lift the button above it there.
-            bottomOffset={screen === 'facultyAvailability' ? 72 : 0}
+            // Sit above the bottom tab bar; the Availability screen also has a
+            // "Save Availability" button pinned above the bar, so lift it more.
+            bottomOffset={screen === 'facultyAvailability' ? 130 : 62}
             onAddTimeSlot={() => handleAddTimeSlot(toDateKey(new Date()))}
-            onSetRecurringSchedule={() => setScreen('recurringSchedule')}
+            onSetRecurringSchedule={() => openScheduleForm('recurringSchedule')}
             onOpenSlotIQ={handleOpenSlotIQ}
           />
         )}
 
-      <SideMenu
-        visible={sideMenuOpen}
-        role={userRole}
-        userName={userRole === 'faculty' ? facultyProfile.name : studentProfile.name}
-        activeKey={sideMenuActiveKey}
-        // Real unread count — the same notifications state now backs
-        // both the student and faculty Notifications screens.
-        notificationCount={unreadNotificationCount}
-        // Same photo shown on the Profile screen — updates immediately
-        // after handleChangeAvatar saves a new one to Supabase.
-        photoUri={userRole === 'faculty' ? facultyProfile.photoUri : studentProfile.photoUri}
-        onClose={() => setSideMenuOpen(false)}
-        onNavigate={handleSideMenuNavigate}
-        onLogout={handleSideMenuLogout}
+      <CancelReasonModal
+        visible={!!cancelReasonTarget}
+        facultyName={cancelReasonTarget?.doctorName ?? ''}
+        facultyPhotoUri={cancelReasonTarget?.facultyAvatarUrl}
+        summary={cancelReasonTarget ? cancelReasonTarget.date.replace(' · ', ' at ') : ''}
+        onClose={() => setCancelReasonTarget(null)}
+        onConfirm={async (reason) => {
+          const target = cancelReasonTarget;
+          setCancelReasonTarget(null);
+          await handleStudentCancel(target, reason);
+        }}
       />
 
       <StatusBar style={isAuthScreen ? 'light' : 'dark'} />
@@ -4310,7 +4373,7 @@ function AppContent() {
           </View>
         </View>
       )}
-    </>
+    </NotificationBadgeContext.Provider>
   );
 }
 

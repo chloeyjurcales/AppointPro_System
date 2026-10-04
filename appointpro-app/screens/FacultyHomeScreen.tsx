@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import ProfileAvatar from '../components/ProfileAvatar';
 
 export type ScheduleMode = 'face-to-face' | 'online';
@@ -23,16 +23,10 @@ export type ScheduleItem = {
   photoUri?: string;
 };
 
-type QuickAction = {
-  key: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  background: string;
-  onPress?: () => void;
-};
-
 type FacultyHomeScreenProps = {
   facultyFirstName?: string;
+  facultyFullName?: string;
+  photoUri?: string;
   appointmentsCount?: number;
   pendingReschedulesCount?: number;
   walkInQueueCount?: number;
@@ -53,7 +47,6 @@ type FacultyHomeScreenProps = {
   onOpenPendingReschedules?: () => void;
   onOpenAvailability?: () => void;
   onOpenWalkInQueue?: () => void;
-  onOpenSlotIQAI?: () => void;
   onTabChange?: (tab: FacultyTabKey) => void;
 };
 
@@ -65,6 +58,8 @@ const FALLBACK_SCHEDULE: ScheduleItem[] = [
 
 export default function FacultyHomeScreen({
   facultyFirstName = 'Juan',
+  facultyFullName,
+  photoUri,
   appointmentsCount = 8,
   pendingReschedulesCount = 2,
   walkInQueueCount = 6,
@@ -81,33 +76,22 @@ export default function FacultyHomeScreen({
   onOpenPendingReschedules,
   onOpenAvailability,
   onOpenWalkInQueue,
-  onOpenSlotIQAI,
   onTabChange,
 }: FacultyHomeScreenProps) {
-  const quickActions: QuickAction[] = [
-    { key: 'slotiq', label: 'SlotIQ AI', icon: 'sparkles-outline', background: '#9B5DE5', onPress: onOpenSlotIQAI },
-  ];
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onMenuPress}>
-          <Ionicons name="menu" size={24} color={colors.textDark} />
-        </TouchableOpacity>
+        <ProfileAvatar
+          uri={photoUri}
+          name={facultyFullName ?? facultyFirstName}
+          size={44}
+          role="faculty"
+          style={styles.headerAvatar}
+        />
         <View style={styles.headerTextWrap}>
           <Text style={styles.greeting}>Hi, {facultyFirstName}! 👋</Text>
           <Text style={styles.greetingSub}>Welcome back</Text>
         </View>
-        <TouchableOpacity onPress={onNotificationsPress} style={styles.bellWrap}>
-          <Ionicons name="notifications-outline" size={22} color={colors.textDark} />
-          {unreadCount > 0 && (
-            <View style={styles.bellBadge}>
-              <Text style={styles.bellBadgeText}>
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       <View style={styles.headerDivider} />
@@ -200,26 +184,9 @@ export default function FacultyHomeScreen({
             ))
           )}
         </View>
-
-        <View style={styles.quickActionsCard}>
-          <View style={styles.quickActionsRow}>
-            {quickActions.map((action) => (
-              <TouchableOpacity
-                key={action.key}
-                style={styles.quickAction}
-                onPress={action.onPress}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.quickActionIconWrap, { backgroundColor: action.background }]}>
-                  <Ionicons name={action.icon} size={20} color={colors.white} />
-                </View>
-                <Text style={styles.quickActionLabel}>{action.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
       </ScrollView>
 
+      <FacultyBottomTabBar active="home" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
@@ -235,9 +202,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
+  headerAvatar: {
+    marginRight: spacing.md,
+  },
   headerTextWrap: {
     flex: 1,
-    marginLeft: spacing.md,
   },
   greeting: {
     fontSize: 14,
@@ -418,39 +387,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 10,
     fontWeight: '700',
-  },
-  quickActionsTitle: {
-    marginBottom: spacing.sm,
-  },
-  quickActionsCard: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: spacing.md,
-  },
-  quickActionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  quickAction: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  quickActionIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.sm,
-  },
-  quickActionLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textDark,
-    textAlign: 'center',
   },
   toastWrap: {
     position: 'absolute',

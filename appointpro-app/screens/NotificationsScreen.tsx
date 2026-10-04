@@ -9,7 +9,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { TabKey } from '../components/BottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import NotificationDetailModal, { NotificationPerson } from '../components/NotificationDetailModal';
 import { NotificationItem, INITIAL_STUDENT_NOTIFICATIONS } from '../data/notifications';
 
 type NotificationsScreenProps = {
@@ -22,6 +23,8 @@ type NotificationsScreenProps = {
   onMarkAllRead?: () => void;
   onMarkAsRead?: (id: string) => void;
   onSelectNotification?: (item: NotificationItem) => void;
+  // Names + profile pictures used to show who a notification is about.
+  people?: NotificationPerson[];
   onTabChange?: (tab: TabKey) => void;
 };
 
@@ -32,10 +35,12 @@ export default function NotificationsScreen({
   onMarkAllRead,
   onMarkAsRead,
   onSelectNotification,
+  people,
   onTabChange,
 }: NotificationsScreenProps) {
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
+  const [openNotification, setOpenNotification] = useState<NotificationItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const allSelected = selectedIds.size > 0 && selectedIds.size === notifications.length;
@@ -82,6 +87,7 @@ export default function NotificationsScreen({
       toggleSelected(item.id);
     } else {
       if (!item.read) onMarkAsRead?.(item.id);
+      setOpenNotification({ ...item, read: true });
       onSelectNotification?.(item);
     }
   };
@@ -94,9 +100,7 @@ export default function NotificationsScreen({
             <Ionicons name="close" size={24} color={colors.textDark} />
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity onPress={onMenuPress}>
-            <Ionicons name="menu" size={24} color={colors.textDark} />
-          </TouchableOpacity>
+          <View style={{ width: 24 }} />
         )}
         <Text style={styles.headerTitle}>
           {selectMode ? `${selectedIds.size} selected` : 'Notifications'}
@@ -185,6 +189,9 @@ export default function NotificationsScreen({
         }
       />
 
+      <NotificationDetailModal notification={openNotification} people={people} onClose={() => setOpenNotification(null)} />
+
+      <BottomTabBar active="notifications" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

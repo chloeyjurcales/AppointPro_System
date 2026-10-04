@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { TabKey } from '../components/BottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import ProfileAvatar from '../components/ProfileAvatar';
 
 export type FacultyStatus = 'available' | 'unavailable';
@@ -125,6 +125,7 @@ export default function DirectoryScreen({
       />
 
       </KeyboardAvoidingView>
+      <BottomTabBar active="directory" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

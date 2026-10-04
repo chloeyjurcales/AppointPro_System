@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
 type MenuItem = {
   key: string;
@@ -31,6 +31,7 @@ type FacultyProfileMenuScreenProps = {
   onPersonalInformation?: () => void;
   onMySchedule?: () => void;
   onAbout?: () => void;
+  onSettings?: () => void;
   onLogout?: () => void;
   onTabChange?: (tab: FacultyTabKey) => void;
   // Lets the faculty member tap their avatar to pick a new photo from
@@ -51,6 +52,7 @@ export default function FacultyProfileMenuScreen({
   onPersonalInformation,
   onMySchedule,
   onAbout,
+  onSettings,
   onLogout,
   onTabChange,
   onChangePhoto,
@@ -66,6 +68,7 @@ export default function FacultyProfileMenuScreen({
   const menuItems: MenuItem[] = [
     { key: 'personal', icon: 'person-outline', label: 'Personal Information', onPress: onPersonalInformation },
     { key: 'schedule', icon: 'calendar-outline', label: 'My Schedule', onPress: onMySchedule },
+    { key: 'settings', icon: 'settings-outline', label: 'Settings', onPress: onSettings },
     { key: 'about', icon: 'information-circle-outline', label: 'About AppointmentPro', onPress: onAbout },
   ];
 
@@ -159,6 +162,7 @@ export default function FacultyProfileMenuScreen({
         </View>
       </ScrollView>
 
+      <FacultyBottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

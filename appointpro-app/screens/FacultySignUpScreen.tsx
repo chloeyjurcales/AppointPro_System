@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import AuthInput from '../components/AuthInput';
+import DepartmentDropdown from '../components/DepartmentDropdown';
 
 type FacultySignUpScreenProps = {
   onBack?: () => void;
@@ -97,12 +98,7 @@ export default function FacultySignUpScreen({
           <View style={styles.spacerSm} />
 
           <Text style={styles.label}>Department</Text>
-          <AuthInput
-            placeholder="Enter your department"
-            value={department}
-            onChangeText={setDepartment}
-            autoCapitalize="words"
-          />
+          <DepartmentDropdown variant="auth" value={department} onChange={setDepartment} />
 
           <View style={styles.spacerSm} />
 

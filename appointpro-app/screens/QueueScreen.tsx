@@ -4,8 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import ProfileAvatar from '../components/ProfileAvatar';
-import { TabKey } from '../components/BottomTabBar';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import {
   QueueEntry,
   getRemainingSeconds,
@@ -316,6 +316,11 @@ export default function QueueScreen({
         </View>
       </ScrollView>
 
+      {isFaculty ? (
+        <FacultyBottomTabBar active="home" onChange={onFacultyTabChange} />
+      ) : (
+        <BottomTabBar active="directory" onChange={onTabChange} />
+      )}
     </SafeAreaView>
   );
 }

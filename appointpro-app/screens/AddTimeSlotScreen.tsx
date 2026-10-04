@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import { ConsultationMode } from '../data/facultySlots';
 
 type Period = 'AM' | 'PM';
@@ -313,6 +313,7 @@ export default function AddTimeSlotScreen({
       </ScrollView>
 
       </KeyboardAvoidingView>
+      <FacultyBottomTabBar active="appointment" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

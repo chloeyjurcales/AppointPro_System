@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import ProfileAvatar from '../components/ProfileAvatar';
 import { colors, spacing } from '../theme';
-import { TabKey } from '../components/BottomTabBar';
+import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import {
   WEEK_DAYS,
   ScheduleSlot,
@@ -252,6 +252,7 @@ export default function FacultyProfileScreen({
         </TouchableOpacity>
       </View>
 
+      <BottomTabBar active="directory" onChange={onTabChange} />
     </SafeAreaView>
   );
 }

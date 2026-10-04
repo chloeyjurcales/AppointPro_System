@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   View,
@@ -10,11 +10,12 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 
 type AppointmentStatus = 'upcoming' | 'pending' | 'completed' | 'cancelled';
 type ConsultationMode = 'face-to-face' | 'online';
@@ -48,6 +49,12 @@ export type StudentAppointment = {
   endTime24?: string; // 'HH:MM:SS'
   startTimeLabel?: string; // e.g. '10:00 AM' (no end time)
   referenceNo?: string; // same reference number the student sees
+  // The availability slot (consultation schedule) this appointment was
+  // booked into, plus that slot's own start/end window. Used to group
+  // students under their schedule.
+  slotId?: string;
+  slotStartTime24?: string;
+  slotEndTime24?: string;
   studentApprovalStatus?: 'pending' | 'approved' | 'declined';
   facultyApprovalStatus?: 'pending' | 'approved' | 'declined';
 };
@@ -131,6 +138,11 @@ export type DbFacultyAppointment = {
   status: 'upcoming' | 'completed' | 'canceled';
   meeting_link: string | null;
   reference_no?: string | null;
+  slot_id?: string | null;
+  availability_slots?:
+    | { start_time: string; end_time: string }
+    | { start_time: string; end_time: string }[]
+    | null;
   student_approval_status?: 'pending' | 'approved' | 'declined' | null;
   faculty_approval_status?: 'pending' | 'approved' | 'declined' | null;
   students: {
@@ -166,6 +178,9 @@ export function mapDbFacultyAppointment(row: DbFacultyAppointment): StudentAppoi
     ? row.students?.profiles[0]
     : row.students?.profiles;
   const isOnline = row.mode === 'Online';
+  const slotWindow = Array.isArray(row.availability_slots)
+    ? row.availability_slots[0]
+    : row.availability_slots;
 
   return {
     id: row.id,
@@ -194,6 +209,9 @@ export function mapDbFacultyAppointment(row: DbFacultyAppointment): StudentAppoi
     endTime24: row.end_time,
     startTimeLabel: formatFacultyApptTime12h(row.start_time),
     referenceNo: row.reference_no ?? undefined,
+    slotId: row.slot_id ?? undefined,
+    slotStartTime24: slotWindow?.start_time,
+    slotEndTime24: slotWindow?.end_time,
     studentApprovalStatus: row.student_approval_status ?? 'approved',
     facultyApprovalStatus: row.faculty_approval_status ?? 'approved',
   };
@@ -217,6 +235,57 @@ type FacultyDirectoryScreenProps = {
   onMenuPress?: () => void;
 };
 
+type ScheduleGroup = {
+  key: string;
+  dateKey: string;
+  dateLabel: string;
+  windowLabel: string;
+  mode: ConsultationMode;
+  location: string;
+  items: StudentAppointment[];
+};
+
+// Groups appointments under the consultation schedule (availability slot)
+// they were booked into. Appointments with no slot fall back to being
+// grouped by date + mode + location.
+function buildScheduleGroups(items: StudentAppointment[]): ScheduleGroup[] {
+  const map = new Map<string, ScheduleGroup>();
+  items.forEach((item) => {
+    const where = item.mode === 'online' ? item.meetingLink ?? '' : item.room ?? '';
+    const key = item.slotId ?? `${item.dateKey ?? item.date}|${item.mode}|${where}`;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        dateKey: item.dateKey ?? '',
+        dateLabel: item.date,
+        windowLabel: '',
+        mode: item.mode,
+        location: item.mode === 'online' ? item.meetingLink || 'Online' : item.room || 'Face-to-Face',
+        items: [],
+      };
+      map.set(key, group);
+    }
+    group.items.push(item);
+  });
+
+  return Array.from(map.values()).map((group) => {
+    const sorted = [...group.items].sort((x, y) => (x.startTime24 ?? '').localeCompare(y.startTime24 ?? ''));
+    const first = sorted[0];
+    const startTime = first.slotStartTime24 ?? first.startTime24;
+    const endTime =
+      first.slotEndTime24 ?? [...sorted].sort((x, y) => (y.endTime24 ?? '').localeCompare(x.endTime24 ?? ''))[0].endTime24;
+    return {
+      ...group,
+      items: sorted,
+      windowLabel:
+        startTime && endTime
+          ? `${formatFacultyApptTime12h(startTime)} - ${formatFacultyApptTime12h(endTime)}`
+          : first.time,
+    };
+  });
+}
+
 export default function FacultyDirectoryScreen({
   appointments,
   onSelectAppointment,
@@ -228,6 +297,7 @@ export default function FacultyDirectoryScreen({
   onMenuPress,
 }: FacultyDirectoryScreenProps) {
   const [activeFilter, setActiveFilter] = useState<AppointmentStatus>('upcoming');
+  const [openGroupKey, setOpenGroupKey] = useState<string | null>(null);
 
   const source = appointments ?? DEFAULT_APPOINTMENTS;
 
@@ -250,6 +320,125 @@ export default function FacultyDirectoryScreen({
     return appointment.status === activeFilter;
   });
 
+  // Queue number = a student's place in that day's line, ordered by
+  // scheduled appointment time (the same order the live Queue uses).
+  // Only approved upcoming appointments and completed ones count; pending
+  // and cancelled appointments have no queue spot.
+  const queueNumbers = new Map<string, number>();
+  const byDate = new Map<string, StudentAppointment[]>();
+  source.forEach((a) => {
+    const inLine = (a.status === 'upcoming' && isFullyApproved(a)) || a.status === 'completed';
+    if (!inLine || !a.dateKey) return;
+    byDate.set(a.dateKey, [...(byDate.get(a.dateKey) ?? []), a]);
+  });
+  byDate.forEach((list) => {
+    [...list]
+      .sort((x, y) => (x.startTime24 ?? '').localeCompare(y.startTime24 ?? '') || x.id.localeCompare(y.id))
+      .forEach((a, index) => queueNumbers.set(a.id, index + 1));
+  });
+
+  const newestFirst = activeFilter === 'completed' || activeFilter === 'cancelled';
+  const groups = buildScheduleGroups(filtered).sort((x, y) => {
+    const byDay = x.dateKey.localeCompare(y.dateKey);
+    const byWindow = x.windowLabel.localeCompare(y.windowLabel);
+    return newestFirst ? -byDay || byWindow : byDay || byWindow;
+  });
+  const openGroup = openGroupKey ? groups.find((g) => g.key === openGroupKey) ?? null : null;
+
+  // Phone's back button closes the open schedule before leaving the screen.
+  useEffect(() => {
+    if (!openGroup) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setOpenGroupKey(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [openGroup]);
+
+  const queueLabel = (item: StudentAppointment): string => {
+    const n = queueNumbers.get(item.id);
+    if (n) return `Queue #${n}`;
+    if (item.status === 'cancelled') return 'No queue number';
+    return 'Not in queue yet';
+  };
+
+  const renderStudent = (item: StudentAppointment) => (
+    <TouchableOpacity
+      key={item.id}
+      style={styles.card}
+      onPress={() => onSelectAppointment?.(item)}
+      activeOpacity={0.8}
+    >
+      <View style={styles.cardTopRow}>
+        <View style={styles.avatarWrap}>
+          {item.photoUri ? (
+            <Image source={{ uri: item.photoUri }} style={styles.avatarImage} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Feather name="user" size={20} color={colors.white} />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.infoWrap}>
+          <Text style={styles.name}>{item.studentName}</Text>
+          <Text style={styles.detailText}>{item.time}</Text>
+          <Text style={styles.detailText}>{item.purpose || item.category}</Text>
+        </View>
+
+        <View style={[styles.queueBadge, queueNumbers.has(item.id) && styles.queueBadgeActive]}>
+          <Text style={[styles.queueBadgeText, queueNumbers.has(item.id) && styles.queueBadgeTextActive]}>
+            {queueLabel(item)}
+          </Text>
+        </View>
+      </View>
+
+      {activeFilter === 'pending' && item.facultyApprovalStatus === 'pending' && (
+        <View style={styles.approvalStatusWrap}>
+          <View style={[styles.approvalBadge, styles.approvalBadgeReady]}>
+            <Text style={[styles.approvalBadgeText, styles.approvalBadgeReadyText]}>
+              AWAITING FACULTY APPROVAL
+            </Text>
+          </View>
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => onApprovePress?.(item)}>
+              <Text style={styles.actionButtonText}>Approve</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.actionButtonDanger]}
+              onPress={() =>
+                Alert.alert(
+                  'Decline this appointment?',
+                  `Are you sure you want to decline ${item.studentName}'s appointment on ${item.date}, ${item.time}? ${item.studentName} will be notified.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Yes, Decline', style: 'destructive', onPress: () => onDeclinePress?.(item) },
+                  ]
+                )
+              }
+            >
+              <Text style={styles.actionButtonDangerText}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {activeFilter === 'upcoming' && (
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => onReschedulePress?.(item)}>
+            <Text style={styles.actionButtonText}>Reschedule</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionButtonDanger]}
+            onPress={() => onCancelPress?.(item)}
+          >
+            <Text style={styles.actionButtonDangerText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -257,148 +446,107 @@ export default function FacultyDirectoryScreen({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onMenuPress} style={styles.menuButton}>
-          <Feather name="menu" size={24} color={colors.textDark} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Directory</Text>
-      </View>
-
-      <View style={styles.searchBar}>
-        <Feather name="search" size={16} color={colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by reference number (e.g. APP-2026-000791)"
-          placeholderTextColor="#9B9B9B"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="characters"
-          autoCorrect={false}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Feather name="x-circle" size={16} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.filterRow}>
-        {TABS.map((tab) => {
-          const isActive = tab.key === activeFilter;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.filterTab}
-              onPress={() => setActiveFilter(tab.key)}
-            >
-              <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
-                {tab.label}
-              </Text>
-              {isActive && <View style={styles.filterUnderline} />}
+      {openGroup ? (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => setOpenGroupKey(null)} style={styles.menuButton}>
+              <Feather name="arrow-left" size={24} color={colors.textDark} />
             </TouchableOpacity>
-          );
-        })}
-      </View>
+            <Text style={styles.headerTitle}>Schedule</Text>
+          </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            onPress={() => onSelectAppointment?.(item)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.cardTopRow}>
-              <View style={styles.avatarWrap}>
-                {item.photoUri ? (
-                  <Image source={{ uri: item.photoUri }} style={styles.avatarImage} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Feather name="user" size={20} color={colors.white} />
+          <View style={styles.scheduleSummary}>
+            <Text style={styles.scheduleDate}>{openGroup.dateLabel}</Text>
+            <Text style={styles.scheduleTime}>{openGroup.windowLabel}</Text>
+            <Text style={styles.detailText}>
+              {openGroup.mode === 'online' ? 'Online' : `${openGroup.location} · Face-to-Face`}
+              {openGroup.mode === 'online' && openGroup.location !== 'Online' ? ` · ${openGroup.location}` : ''}
+            </Text>
+            <Text style={styles.scheduleCount}>
+              {openGroup.items.length} student{openGroup.items.length === 1 ? '' : 's'} booked
+            </Text>
+          </View>
+
+          <FlatList
+            data={openGroup.items}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => renderStudent(item)}
+          />
+        </>
+      ) : (
+        <>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Directory</Text>
+          </View>
+
+          <View style={styles.searchBar}>
+            <Feather name="search" size={16} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by reference number (e.g. APP-2026-000791)"
+              placeholderTextColor="#9B9B9B"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Feather name="x-circle" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.filterRow}>
+            {TABS.map((tab) => {
+              const isActive = tab.key === activeFilter;
+              return (
+                <TouchableOpacity key={tab.key} style={styles.filterTab} onPress={() => setActiveFilter(tab.key)}>
+                  <Text style={[styles.filterText, isActive && styles.filterTextActive]}>{tab.label}</Text>
+                  {isActive && <View style={styles.filterUnderline} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <FlatList
+            data={groups}
+            keyExtractor={(group) => group.key}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item: group }) => (
+              <TouchableOpacity style={styles.card} onPress={() => setOpenGroupKey(group.key)} activeOpacity={0.8}>
+                <View style={styles.cardTopRow}>
+                  <View style={styles.scheduleIcon}>
+                    <Feather name="calendar" size={20} color={colors.white} />
                   </View>
-                )}
-                {item.isOnline && <View style={styles.onlineDot} />}
-              </View>
-
-              <View style={styles.infoWrap}>
-                <Text style={styles.name}>{item.studentName}</Text>
-                <Text style={styles.detailText}>
-                  {item.date}, {item.time}
-                </Text>
-                <Text style={styles.detailText}>{item.purpose || item.category}</Text>
-                <Text style={styles.detailText}>
-                  {item.mode === 'online'
-                    ? 'Online'
-                    : item.room
-                    ? `${item.room} · Face-to-Face`
-                    : 'Face-to-Face'}
-                </Text>
-              </View>
-            </View>
-
-            {activeFilter === 'pending' && item.facultyApprovalStatus === 'pending' && (
-              <View style={styles.approvalStatusWrap}>
-                <View style={[styles.approvalBadge, styles.approvalBadgeReady]}>
-                  <Text style={[styles.approvalBadgeText, styles.approvalBadgeReadyText]}>
-                    AWAITING FACULTY APPROVAL
-                  </Text>
+                  <View style={styles.infoWrap}>
+                    <Text style={styles.name}>{group.dateLabel}</Text>
+                    <Text style={styles.detailText}>{group.windowLabel}</Text>
+                    <Text style={styles.detailText}>
+                      {group.mode === 'online' ? 'Online' : `${group.location} · Face-to-Face`}
+                    </Text>
+                  </View>
+                  <View style={styles.countWrap}>
+                    <Text style={styles.countNumber}>{group.items.length}</Text>
+                    <Text style={styles.countLabel}>{group.items.length === 1 ? 'student' : 'students'}</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color={colors.textMuted} />
                 </View>
-                <View style={styles.actionsRow}>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => onApprovePress?.(item)}
-                    >
-                      <Text style={styles.actionButtonText}>Approve</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.actionButtonDanger]}
-                      onPress={() =>
-                        Alert.alert(
-                          'Decline this appointment?',
-                          `Are you sure you want to decline ${item.studentName}'s appointment on ${item.date}, ${item.time}? The student will be notified.`,
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Yes, Decline', style: 'destructive', onPress: () => onDeclinePress?.(item) },
-                          ]
-                        )
-                      }
-                    >
-                      <Text style={styles.actionButtonDangerText}>Decline</Text>
-                    </TouchableOpacity>
-                  </View>
-              </View>
+              </TouchableOpacity>
             )}
-
-            {activeFilter === 'upcoming' && (
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => onReschedulePress?.(item)}
-                >
-                  <Text style={styles.actionButtonText}>Reschedule</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.actionButtonDanger]}
-                  onPress={() => onCancelPress?.(item)}
-                >
-                  <Text style={styles.actionButtonDangerText}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {searchQuery.trim()
-              ? 'No appointment found with that reference number.'
-              : `No ${activeFilter} appointments.`}
-          </Text>
-        }
-      />
-
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>
+                {searchQuery.trim()
+                  ? 'No appointment found with that reference number.'
+                  : `No ${activeFilter} schedules.`}
+              </Text>
+            }
+          />
+        </>
+      )}
       </KeyboardAvoidingView>
+      <FacultyBottomTabBar active="directory" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
@@ -595,5 +743,79 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
     marginTop: spacing.xl,
+  },
+  scheduleIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md,
+  },
+  countWrap: {
+    alignItems: 'center',
+    marginHorizontal: spacing.sm,
+  },
+  countNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  countLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+  },
+  scheduleSummary: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  scheduleDate: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textDark,
+  },
+  scheduleTime: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textDark,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  scheduleCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+    marginTop: 6,
+  },
+  queueBadge: {
+    minWidth: 84,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.tabInactiveBg,
+    marginLeft: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueBadgeActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  queueBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  queueBadgeTextActive: {
+    color: colors.white,
   },
 });

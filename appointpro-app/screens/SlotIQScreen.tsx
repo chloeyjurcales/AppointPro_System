@@ -14,7 +14,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import ClassTimePicker, {
+  TimeBox,
+  emptyTimeBox,
+  isTimeBoxComplete,
+  isTimeBoxEmpty,
+  timeBoxToText,
+} from '../components/ClassTimePicker';
 import {
   SlotIQOptions,
   SlotIQResult,
@@ -75,8 +82,8 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const [maxSlotsPerDay, setMaxSlotsPerDay] = useState('4');
   const [mode, setMode] = useState<'Face-to-Face' | 'Online'>('Face-to-Face');
   const [location, setLocation] = useState('');
-  // Class times per day (busy time). Each entry is one input box holding one range, e.g. "7-9am".
-  const [dayInputs, setDayInputs] = useState<Record<number, string[]>>({});
+  // Class times per day (busy time). Each entry is one class time picked with hour / minute / AM-PM dropdowns.
+  const [dayInputs, setDayInputs] = useState<Record<number, TimeBox[]>>({});
   // Days consultations may be held on; default Monday-Friday.
   const [availableDays, setAvailableDays] = useState<number[]>([1, 2, 3, 4, 5]);
   // Consultations are only suggested inside this daily window.
@@ -92,7 +99,12 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const parsedDays = useMemo(
     () =>
       DAY_ORDER.map((day) => {
-        const boxes = (dayInputs[day] ?? ['']).map(parseTimeBox);
+        const boxes = (dayInputs[day] ?? [emptyTimeBox()]).map((timeBox) =>
+          // Half-picked times (e.g. hour chosen but no AM/PM yet) are flagged until every dropdown is set.
+          !isTimeBoxEmpty(timeBox) && !isTimeBoxComplete(timeBox)
+            ? { range: null, error: 'Pick the hour, minute and AM/PM for both start and end.' }
+            : parseTimeBox(timeBoxToText(timeBox)),
+        );
         const ranges = boxes
           .flatMap((box) => (box.range ? [box.range] : []))
           .sort((x, y) => x.startTime.localeCompare(y.startTime));
@@ -105,9 +117,9 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
     [dayInputs, availableDays, parsedWindow],
   );
 
-  const setBox = (day: number, index: number, value: string) => {
+  const setBox = (day: number, index: number, value: TimeBox) => {
     setDayInputs((prev) => {
-      const boxes = [...(prev[day] ?? [''])];
+      const boxes = [...(prev[day] ?? [emptyTimeBox()])];
       boxes[index] = value;
       return { ...prev, [day]: boxes };
     });
@@ -115,16 +127,16 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
   const addBox = (day: number) => {
     setDayInputs((prev) => {
-      const boxes = prev[day] ?? [''];
+      const boxes = prev[day] ?? [emptyTimeBox()];
       if (boxes.length >= MAX_BOXES_PER_DAY) return prev;
-      return { ...prev, [day]: [...boxes, ''] };
+      return { ...prev, [day]: [...boxes, emptyTimeBox()] };
     });
   };
 
   const removeBox = (day: number, index: number) => {
     setDayInputs((prev) => {
-      const boxes = (prev[day] ?? ['']).filter((_, i) => i !== index);
-      return { ...prev, [day]: boxes.length ? boxes : [''] };
+      const boxes = (prev[day] ?? [emptyTimeBox()]).filter((_, i) => i !== index);
+      return { ...prev, [day]: boxes.length ? boxes : [emptyTimeBox()] };
     });
   };
 
@@ -274,7 +286,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
         <View style={styles.summaryCard}>
           <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.primary} />
           <Text style={styles.summaryText}>
-            What are your classes this semester? For each day, type one class time per box, for example 7-9am. Tap + to add another class time on the same day. Leave the box blank if you have no classes. SlotIQ will never suggest a consultation during these times. Turn a day off if you don't hold consultations on it.
+            What are your classes this semester? For each day, choose the start and end of each class from the hour, minute and AM/PM dropdowns (on a computer, use the Up and Down arrow keys to move through the choices). Tap + to add another class time on the same day. Leave the dropdowns empty if you have no classes. SlotIQ will never suggest a consultation during these times. Turn a day off if you don't hold consultations on it.
           </Text>
         </View>
 
@@ -297,14 +309,10 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                   {item.boxes.map((box, boxIndex) => (
                     <View key={boxIndex}>
                       <View style={styles.boxRow}>
-                        <TextInput
-                          value={(dayInputs[item.day] ?? [''])[boxIndex] ?? ''}
-                          onChangeText={(value) => setBox(item.day, boxIndex, value)}
-                          placeholder="Class time, e.g. 7-9am"
-                          placeholderTextColor={colors.textMuted}
-                          style={[styles.input, styles.boxInput, !!box.error && styles.inputError]}
-                          autoCapitalize="none"
-                          autoCorrect={false}
+                        <ClassTimePicker
+                          value={(dayInputs[item.day] ?? [emptyTimeBox()])[boxIndex] ?? emptyTimeBox()}
+                          onChange={(value) => setBox(item.day, boxIndex, value)}
+                          hasError={!!box.error}
                         />
                         {item.boxes.length > 1 && (
                           <TouchableOpacity
@@ -535,6 +543,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
         </View>
       </Modal>
 
+      <FacultyBottomTabBar active="profile" onChange={onTabChange} />
     </SafeAreaView>
   );
 }
@@ -566,7 +575,6 @@ const styles = StyleSheet.create({
   errorText: { marginTop: 5, fontSize: 11, color: colors.danger },
   previewText: { marginTop: 3, fontSize: 11, color: colors.success, fontWeight: '600' },
   boxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  boxInput: { flex: 1 },
   removeButton: { width: 28, height: 44, alignItems: 'center', justifyContent: 'center' },
   addBoxButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, alignSelf: 'flex-start', paddingVertical: 4 },
   addBoxText: { fontSize: 12, fontWeight: '700', color: colors.primary },

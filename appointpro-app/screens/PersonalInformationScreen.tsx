@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
+import DepartmentDropdown from '../components/DepartmentDropdown';
 import AnimatedPressable from '../components/AnimatedPressable';
 import AuthInput from '../components/AuthInput';
 
@@ -179,13 +180,7 @@ export default function PersonalInformationScreen({
           />
 
           <Text style={styles.label}>Department</Text>
-          <TextInput
-            style={styles.input}
-            value={form.department}
-            onChangeText={update('department')}
-            placeholder="Enter your department"
-            placeholderTextColor={colors.textMuted}
-          />
+          <DepartmentDropdown value={form.department} onChange={update('department')} />
 
           <Text style={styles.label}>Year Level</Text>
           <TextInput

@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
 import AnimatedPressable from './AnimatedPressable';
+import { NotificationBadgeContext } from './NotificationBadgeContext';
+import useKeyboardVisible from './useKeyboardVisible';
 
 export type TabKey = 'home' | 'directory' | 'appointments' | 'notifications' | 'profile';
 
@@ -20,6 +22,9 @@ const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }
 ];
 
 export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
+  const unreadCount = useContext(NotificationBadgeContext);
+  const keyboardVisible = useKeyboardVisible();
+  if (keyboardVisible) return null;
   return (
     <View style={styles.bar}>
       {TABS.map((tab) => {
@@ -31,11 +36,18 @@ export default function BottomTabBar({ active, onChange }: BottomTabBarProps) {
             onPress={() => onChange?.(tab.key)}
             scaleTo={0.88}
           >
-            <Ionicons
-              name={tab.icon}
-              size={20}
-              color={isActive ? colors.primary : colors.textMuted}
-            />
+            <View>
+              <Ionicons
+                name={tab.icon}
+                size={20}
+                color={isActive ? colors.primary : colors.textMuted}
+              />
+              {tab.key === 'notifications' && unreadCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </View>
             <Text style={[styles.label, isActive && styles.labelActive]}>{tab.label}</Text>
           </AnimatedPressable>
         );
@@ -57,6 +69,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: 3,
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -9,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.white,
   },
   label: {
     fontSize: 10,
