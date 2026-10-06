@@ -545,3 +545,23 @@
     grid-column: 3;
   }
 }
+.nv-sender {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary, #1d4ed8);
+}
+
+.nv-notification-icon .nv-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.nv-avatar-initials {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}

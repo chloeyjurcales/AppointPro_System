@@ -112,7 +112,22 @@ type DbNotification = {
   description: string | null;
   read: boolean;
   created_at: string;
+  sender?: SenderRow | SenderRow[] | null;
 };
+
+type OneOrMany<T> = T | T[] | null | undefined;
+type SenderRow = {
+  full_name: string | null;
+  avatar_url?: string | null;
+  role?: string | null;
+  // `department` lives on the role tables, not on `profiles`.
+  students?: OneOrMany<{ department: string | null }>;
+  faculty?: OneOrMany<{ department: string | null }>;
+};
+const firstOf = <T,>(v: OneOrMany<T>): T | null | undefined => (Array.isArray(v) ? v[0] : v);
+
+const NOTIFICATION_SELECT =
+  '*, sender:profiles!sender_id(full_name, avatar_url, role, students(department), faculty(department))';
 
 // The `notifications` table doesn't have its own "kind" column, so the
 // icon string chosen when the row was created (see App.tsx's
@@ -151,8 +166,23 @@ function formatRelativeTime(isoTimestamp: string): string {
   });
 }
 
+function describeSender(row: DbNotification): string | undefined {
+  const sender = Array.isArray(row.sender) ? row.sender[0] : row.sender;
+  if (!sender?.full_name) return undefined;
+  const role = sender.role ? sender.role.charAt(0).toUpperCase() + sender.role.slice(1) : undefined;
+  const department = firstOf(sender.students)?.department ?? firstOf(sender.faculty)?.department;
+  return [sender.full_name, role, department].filter(Boolean).join(' · ');
+}
+
 function mapDbNotification(row: DbNotification): Notification {
+  const senderRow = Array.isArray(row.sender) ? row.sender[0] : row.sender;
   return {
+    sender: describeSender(row),
+    senderName: senderRow?.full_name ?? undefined,
+    senderAvatarUrl: senderRow?.avatar_url ?? undefined,
+    fullTime: new Date(row.created_at).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    }),
     id: row.id,
     type: iconToNotificationType(row.icon),
     title: row.title,
@@ -333,19 +363,28 @@ export default function Dashboard({
   useEffect(() => {
     let isMounted = true;
 
-    supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', facultyId)
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (!isMounted) return;
-        if (error) {
-          console.log('Failed to load notifications:', error.message);
-          return;
-        }
-        setNotifications((data as DbNotification[]).map(mapDbNotification));
-      });
+    const loadNotifications = async () => {
+      let result = await supabase
+        .from('notifications')
+        .select(NOTIFICATION_SELECT)
+        .eq('user_id', facultyId)
+        .order('created_at', { ascending: false });
+      if (result.error) {
+        // sender_id column / relationship not set up yet — load without it.
+        result = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', facultyId)
+          .order('created_at', { ascending: false });
+      }
+      if (!isMounted) return;
+      if (result.error) {
+        console.log('Failed to load notifications:', result.error.message);
+        return;
+      }
+      setNotifications((result.data as unknown as DbNotification[]).map(mapDbNotification));
+    };
+    loadNotifications();
 
     const channel = supabase
       .channel(`dashboard-notifications-${facultyId}`)
@@ -358,8 +397,26 @@ export default function Dashboard({
           filter: `user_id=eq.${facultyId}`,
         },
         (payload) => {
-          const newItem = mapDbNotification(payload.new as DbNotification);
+          const row = payload.new as DbNotification;
+          const newItem = mapDbNotification(row);
           setNotifications((prev) => [newItem, ...prev]);
+          // The realtime payload has no joined sender; look it up and fill it in.
+          supabase
+            .from('notifications')
+            .select(NOTIFICATION_SELECT)
+            .eq('id', row.id)
+            .maybeSingle()
+            .then(({ data }) => {
+              if (!data) return;
+              const full = mapDbNotification(data as unknown as DbNotification);
+              setNotifications((prev) =>
+                prev.map((n) =>
+                  n.id === full.id
+                    ? { ...n, sender: full.sender, senderName: full.senderName, senderAvatarUrl: full.senderAvatarUrl }
+                    : n,
+                ),
+              );
+            });
         },
       )
       .subscribe();

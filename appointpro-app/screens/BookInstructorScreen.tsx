@@ -17,7 +17,7 @@ import ProfileAvatar from '../components/ProfileAvatar';
 import { FacultyMember } from './DirectoryScreen';
 
 type BookInstructorScreenProps = {
-  // Already limited to the student's own department by the caller.
+  // All instructors the student can book (own department listed first by the caller).
   faculty?: FacultyMember[];
   studentDepartment?: string;
   loading?: boolean;
@@ -28,7 +28,7 @@ type BookInstructorScreenProps = {
 
 /**
  * Opened from the "+" button on the student side. The student can see, search
- * and book instructors from their own department only.
+ * and book any instructor.
  */
 export default function BookInstructorScreen({
   faculty = [],
@@ -48,11 +48,9 @@ export default function BookInstructorScreen({
 
   const emptyText = loading
     ? 'Loading instructors…'
-    : !hasDepartment
-    ? 'Your department isn\'t set yet. Add it in your profile to see instructors you can book.'
     : query
     ? 'No instructors match your search.'
-    : `No instructors from ${studentDepartment} have signed up yet.`;
+    : 'No instructors have signed up yet.';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -71,8 +69,8 @@ export default function BookInstructorScreen({
 
         <Text style={styles.subtitle}>
           {hasDepartment
-            ? `Instructors from your department (${studentDepartment})`
-            : 'Instructors from your department'}
+            ? `All instructors · ${studentDepartment} listed first`
+            : 'All instructors'}
         </Text>
 
         <View style={styles.searchRow}>

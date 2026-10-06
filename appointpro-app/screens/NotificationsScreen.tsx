@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
+import ProfileAvatar from '../components/ProfileAvatar';
 import BottomTabBar, { TabKey } from '../components/BottomTabBar';
 import NotificationDetailModal, { NotificationPerson } from '../components/NotificationDetailModal';
 import { NotificationItem, INITIAL_STUDENT_NOTIFICATIONS } from '../data/notifications';
@@ -167,14 +168,28 @@ export default function NotificationsScreen({
                   {isSelected && <Ionicons name="checkmark" size={12} color={colors.white} />}
                 </View>
               )}
-              <View style={styles.iconWrap}>
-                <Ionicons name={item.icon} size={18} color={colors.primary} />
-              </View>
+              {item.senderName ? (
+                <ProfileAvatar
+                  uri={item.senderAvatarUrl}
+                  name={item.senderName}
+                  size={40}
+                  style={{ marginRight: spacing.md }}
+                />
+              ) : (
+                <View style={styles.iconWrap}>
+                  <Ionicons name={item.icon} size={18} color={colors.primary} />
+                </View>
+              )}
               <View style={styles.textWrap}>
                 <View style={styles.titleRow}>
                   <Text style={styles.itemTitle}>{item.title}</Text>
                   {!item.read && <View style={styles.unreadDot} />}
                 </View>
+                {!!item.senderName && (
+                  <Text style={styles.itemSender} numberOfLines={1}>
+                    {[item.senderName, item.senderRole, item.senderDepartment].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
                 <Text style={styles.itemDesc}>{item.description}</Text>
               </View>
               <Text style={styles.itemTime}>{item.time}</Text>
@@ -306,6 +321,12 @@ const styles = StyleSheet.create({
   },
   textWrap: {
     flex: 1,
+  },
+  itemSender: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
+    marginTop: 1,
   },
   titleRow: {
     flexDirection: 'row',

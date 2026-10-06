@@ -26,6 +26,12 @@ function findPerson(notification: NotificationItem | null, people: NotificationP
   );
 }
 
+function formatReceived(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 /** Overview of a single notification, shown when it is tapped in the list. */
 export default function NotificationDetailModal({ notification, people = [], onClose }: Props) {
   // Prefer the real sender saved with the notification; otherwise fall back to
@@ -54,10 +60,17 @@ export default function NotificationDetailModal({ notification, people = [], onC
 
               <Text style={styles.title}>{notification.title}</Text>
               {!!person && <Text style={styles.personName}>{person.name}</Text>}
+              {!!notification.senderName && !!(notification.senderRole || notification.senderDepartment) && (
+                <Text style={styles.personMeta}>
+                  {[notification.senderRole, notification.senderDepartment].filter(Boolean).join(' · ')}
+                </Text>
+              )}
 
               <View style={styles.metaRow}>
                 <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                <Text style={styles.metaText}>Received {notification.time}</Text>
+                <Text style={styles.metaText}>
+                  Received {notification.createdAt ? formatReceived(notification.createdAt) : notification.time}
+                </Text>
               </View>
 
               <View style={styles.divider} />
@@ -116,6 +129,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.primary,
+    marginTop: 2,
+  },
+  personMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
     marginTop: 2,
   },
   metaRow: {

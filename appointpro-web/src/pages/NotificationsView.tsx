@@ -12,6 +12,13 @@ export type Notification = {
   type: NotificationType;
   title: string;
   message: string;
+  // Who sent it, e.g. "Maria Santos · Student · College of Computer Studies (CCS)".
+  sender?: string;
+  // Sender's name and profile picture; when set, shown instead of the type icon.
+  senderName?: string;
+  senderAvatarUrl?: string;
+  // Full date and time for the hover tooltip.
+  fullTime?: string;
   time: string;
   unread: boolean;
 };
@@ -257,20 +264,38 @@ export default function NotificationsView({
                   className="nv-notification-icon"
                   aria-hidden="true"
                 >
-                  <NotificationIcon
-                    type={notification.type}
-                  />
+                  {notification.senderName ? (
+                    notification.senderAvatarUrl ? (
+                      <img
+                        className="nv-avatar"
+                        src={notification.senderAvatarUrl}
+                        alt=""
+                      />
+                    ) : (
+                      <span className="nv-avatar-initials">
+                        {notification.senderName
+                          .split(/\s+/)
+                          .filter(Boolean)
+                          .map((part, i, all) => (i === 0 || i === all.length - 1 ? part[0] : ''))
+                          .join('')
+                          .toUpperCase()}
+                      </span>
+                    )
+                  ) : (
+                    <NotificationIcon type={notification.type} />
+                  )}
                 </span>
 
                 {/* CONTENT */}
                 <div className="nv-notification-copy">
                   <h2>{notification.title}</h2>
+                  {notification.sender && <span className="nv-sender">{notification.sender}</span>}
 
                   <p>{notification.message}</p>
                 </div>
 
                 {/* TIME */}
-                <time>{notification.time}</time>
+                <time title={notification.fullTime}>{notification.time}</time>
 
               </article>
             ))

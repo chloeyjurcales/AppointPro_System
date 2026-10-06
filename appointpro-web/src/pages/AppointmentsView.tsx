@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
+import { canceledMessage, formatWhen, rescheduledMessage } from '../lib/notificationMessages';
 import './AppointmentsView.css';
 
 type AppointmentStatus = 'Upcoming' | 'Completed' | 'Cancelled';
@@ -21,6 +22,8 @@ type Appointment = {
   // The booking student's real `profiles.id` — needed to notify them
   // when this appointment is cancelled/rescheduled/completed.
   studentUserId: string | undefined;
+  // Only approved appointments may join the live queue / get reminders.
+  approved: boolean;
   // Real Date fields power the reminder/queue features below. `startsAt` is
   // this student's own turn start; `blockStart`/`blockEnd` describe the
   // underlying faculty schedule block the appointment falls in (e.g. a
@@ -125,6 +128,7 @@ type DbAppointment = {
   location: string;
   status: 'upcoming' | 'completed' | 'canceled';
   reference_no: string | null;
+  faculty_approval_status: 'pending' | 'approved' | 'declined' | null;
   students: {
     student_id: string;
     department: string | null;
@@ -217,6 +221,7 @@ function mapDbAppointment(row: DbAppointment): Appointment {
     mode: row.mode,
     location: row.location,
     studentUserId: row.student_id,
+    approved: (row.faculty_approval_status ?? 'approved') === 'approved',
     date: formatDbDateLabel(row.date),
     time: `${formatDbTime(row.start_time)} - ${formatDbTime(row.end_time)}`,
     startsAt,
@@ -270,6 +275,17 @@ export default function AppointmentsView({
   const facultyId = session.user.id;
   const [appointments, setAppointments] = useState<Appointment[]>([]);
 
+  // The faculty member's department, shown to students in notifications.
+  const [facultyDepartment, setFacultyDepartment] = useState('');
+  useEffect(() => {
+    supabase
+      .from('faculty')
+      .select('department')
+      .eq('profile_id', facultyId)
+      .maybeSingle()
+      .then(({ data }) => setFacultyDepartment((data as { department?: string } | null)?.department ?? ''));
+  }, [facultyId]);
+
   // Loads this faculty member's real appointments (joined with the
   // booking student's profile and, when applicable, the shared slot they
   // booked into), then keeps them live via Realtime so a new booking or a
@@ -282,7 +298,7 @@ export default function AppointmentsView({
         .from('appointments')
         .select(
           `id, student_id, slot_id, date, start_time, end_time, duration_minutes,
-           category, purpose, mode, location, status, reference_no,
+           category, purpose, mode, location, status, reference_no, faculty_approval_status,
            students ( student_id, department, year_level, profiles ( full_name ) ),
            availability_slots ( start_time, end_time )`,
         )
@@ -357,7 +373,7 @@ export default function AppointmentsView({
     const groups = new Map<string, QueueGroup>();
 
     appointments
-      .filter((appt) => appt.status === 'Upcoming')
+      .filter((appt) => appt.status === 'Upcoming' && appt.approved)
       .forEach((appt) => {
         const key = `${appt.blockStart.getTime()}-${appt.blockEnd.getTime()}`;
         const existing = groups.get(key);
@@ -387,7 +403,7 @@ export default function AppointmentsView({
     const list: { key: string; message: string }[] = [];
 
     appointments.forEach((appt) => {
-      if (appt.status !== 'Upcoming') return;
+      if (appt.status !== 'Upcoming' || !appt.approved) return;
       const minutesUntil = (appt.startsAt.getTime() - now.getTime()) / 60000;
 
       const oneHourKey = `${appt.id}-1hr`;
@@ -456,9 +472,10 @@ export default function AppointmentsView({
     if (next?.studentUserId) {
       supabase.from('notifications').insert({
         user_id: next.studentUserId,
+        sender_id: facultyId,
         icon: 'notifications-outline',
         title: 'Your Turn',
-        description: `${facultyName} is ready for you now.`,
+        description: `${facultyName} is ready for you now for ${next.reason} (${next.date}, ${next.time}).`,
       });
     }
   };
@@ -539,9 +556,12 @@ export default function AppointmentsView({
     if (studentUserId) {
       supabase.from('notifications').insert({
         user_id: studentUserId,
-        icon: 'close-circle-outline',
-        title: 'Appointment Cancelled',
-        description: `${facultyName} cancelled your appointment on ${date} at ${time}. Reason: ${reason}`,
+        sender_id: facultyId,
+        ...canceledMessage(
+          { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+          formatWhen({ dateLabel: date, timeLabel: time }),
+          reason,
+        ),
       });
     }
   };
@@ -643,12 +663,16 @@ export default function AppointmentsView({
     if (studentUserId) {
       supabase.from('notifications').insert({
         user_id: studentUserId,
-        icon: 'calendar-outline',
-        title: 'Appointment Rescheduled',
-        description:
-          rescheduleMode === 'Online'
-            ? `${facultyName} rescheduled your appointment to ${newDate} at ${newTime}. Reason: ${reason}. New meeting link: ${rescheduleMeetingLink.trim()}`
-            : `${facultyName} rescheduled your appointment to ${newDate} at ${newTime}. Reason: ${reason}.`,
+        sender_id: facultyId,
+        ...rescheduledMessage(
+          { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+          { purpose: modal.appointment.reason },
+          formatWhen({ dateLabel: newDate, timeLabel: newTime }),
+          {
+            reason,
+            meetingLink: rescheduleMode === 'Online' ? rescheduleMeetingLink : undefined,
+          },
+        ),
       });
     }
   };

@@ -9,6 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
+import ProfileAvatar from '../components/ProfileAvatar';
 import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
 import NotificationDetailModal, { NotificationPerson } from '../components/NotificationDetailModal';
 import { NotificationItem, INITIAL_FACULTY_NOTIFICATIONS } from '../data/notifications';
@@ -179,20 +180,34 @@ export default function FacultyNotificationsScreen({
                   {isSelected && <Ionicons name="checkmark" size={12} color={colors.white} />}
                 </View>
               )}
-              <MaterialCommunityIcons
-                name={
-                  item.icon === 'sync-outline'
-                    ? 'autorenew'
-                    : item.icon === 'information-circle-outline'
-                    ? 'information-outline'
-                    : 'bell-outline'
-                }
-                size={20}
-                color={colors.textDark}
-                style={styles.icon}
-              />
+              {item.senderName ? (
+                <ProfileAvatar
+                  uri={item.senderAvatarUrl}
+                  name={item.senderName}
+                  size={40}
+                  style={styles.icon}
+                />
+              ) : (
+                <MaterialCommunityIcons
+                  name={
+                    item.icon === 'sync-outline'
+                      ? 'autorenew'
+                      : item.icon === 'information-circle-outline'
+                      ? 'information-outline'
+                      : 'bell-outline'
+                  }
+                  size={20}
+                  color={colors.textDark}
+                  style={styles.icon}
+                />
+              )}
               <View style={styles.textWrap}>
                 <Text style={styles.itemTitle}>{item.title}</Text>
+                {!!item.senderName && (
+                  <Text style={styles.itemSender} numberOfLines={1}>
+                    {[item.senderName, item.senderRole, item.senderDepartment].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
                 <Text style={styles.itemDesc}>{item.description}</Text>
               </View>
               <Text style={styles.itemTime}>{item.time}</Text>
@@ -323,6 +338,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: colors.textDark,
+  },
+  itemSender: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
+    marginTop: 1,
   },
   itemDesc: {
     fontSize: 11,

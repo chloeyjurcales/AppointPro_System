@@ -11,6 +11,12 @@ export type NotificationItem = {
   // list can show their real name and profile picture.
   senderName?: string;
   senderAvatarUrl?: string;
+  // Role and department of the sender, pulled from their profile so the
+  // detail view can say e.g. "Student · College of Computer Studies (CCS)".
+  senderRole?: string;
+  senderDepartment?: string;
+  // Raw timestamp, so the detail view can show the full date and time.
+  createdAt?: string;
 };
 
 export const INITIAL_STUDENT_NOTIFICATIONS: NotificationItem[] = [
@@ -148,23 +154,44 @@ export type DbNotification = {
   created_at: string;
   sender_id?: string | null;
   // Joined from profiles when the notification was loaded with its sender.
-  sender?:
-    | { full_name: string | null; avatar_url: string | null }
-    | { full_name: string | null; avatar_url: string | null }[]
-    | null;
+  sender?: DbSender | DbSender[] | null;
 };
+
+type OneOrMany<T> = T | T[] | null;
+export type DbSender = {
+  full_name: string | null;
+  avatar_url: string | null;
+  role?: string | null;
+  // `department` lives on the role tables, not on `profiles`.
+  students?: OneOrMany<{ department: string | null }>;
+  faculty?: OneOrMany<{ department: string | null }>;
+};
+
+// Select string that pulls the sender's name, picture, role and department.
+export const NOTIFICATION_SENDER_SELECT =
+  'sender:profiles!sender_id(full_name, avatar_url, role, students(department), faculty(department))';
+
+const first = <T,>(v: OneOrMany<T> | undefined): T | null | undefined => (Array.isArray(v) ? v[0] : v);
+
+export function senderDepartment(sender?: DbSender | null): string | undefined {
+  return first(sender?.students)?.department ?? first(sender?.faculty)?.department ?? undefined;
+}
 
 // Converts a real DB row into the shape every notification screen expects.
 export function mapDbNotification(row: DbNotification): NotificationItem {
   const sender = Array.isArray(row.sender) ? row.sender[0] : row.sender;
+  const role = sender?.role ? sender.role.charAt(0).toUpperCase() + sender.role.slice(1) : undefined;
   return {
     id: row.id,
     icon: (row.icon as NotificationItem['icon']) || 'notifications-outline',
     title: row.title,
     description: row.description ?? '',
     time: formatNotificationTimeWithDate(new Date(row.created_at)),
+    createdAt: row.created_at,
     read: row.read,
     senderName: sender?.full_name ?? undefined,
     senderAvatarUrl: sender?.avatar_url ?? undefined,
+    senderRole: role,
+    senderDepartment: senderDepartment(sender),
   };
 }

@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAudioPlayer } from 'expo-audio';
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 // SDK 54+ moved readAsStringAsync/getInfoAsync to the "legacy" entrypoint;
 // the new default export uses a different File/Directory class API.
@@ -19,6 +19,14 @@ import * as Font from 'expo-font';
 import { Ionicons, Feather, FontAwesome, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
+import {
+  approvedMessage,
+  bookedMessage,
+  canceledMessage,
+  declinedMessage,
+  formatWhen,
+  rescheduledMessage,
+} from './lib/notificationMessages';
 import { colors, spacing } from './theme';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -130,7 +138,10 @@ import {
 import {
   NotificationItem,
   DbNotification,
+  DbSender,
+  NOTIFICATION_SENDER_SELECT,
   mapDbNotification,
+  senderDepartment,
 } from './data/notifications';
 
 type Screen =
@@ -606,6 +617,28 @@ function AppContent() {
     require('./assets/sounds/notification.wav')
   );
 
+  // Without this, iPhones in silent mode (and some Android setups) play
+  // nothing. Set once at startup so the chime is audible.
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch((err) =>
+      console.log('Could not set audio mode:', err)
+    );
+  }, []);
+
+  // Plays the notification chime from the start. Awaiting the rewind first
+  // matters: calling play() while the previous playback is still finishing
+  // used to do nothing, and errors were swallowed so it failed silently.
+  const playNotificationSound = async () => {
+    try {
+      await notificationSoundPlayer.seekTo(0);
+      notificationSoundPlayer.play();
+    } catch (err) {
+      console.log('Notification sound failed:', err);
+    }
+  };
+  const playNotificationSoundRef = useRef(playNotificationSound);
+  playNotificationSoundRef.current = playNotificationSound;
+
   // Lightweight app-wide toast for actions that are wired up but don't
   // have a real destination yet (e.g. "Filters", "More options") — so
   // every button gives real feedback on tap instead of doing nothing.
@@ -970,7 +1003,7 @@ function AppContent() {
     (async () => {
       let result = await supabase
         .from('notifications')
-        .select('*, sender:profiles!sender_id(full_name, avatar_url)')
+        .select(`*, ${NOTIFICATION_SENDER_SELECT}`)
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
       if (result.error) {
@@ -1007,28 +1040,33 @@ function AppContent() {
           if (row.sender_id) {
             supabase
               .from('profiles')
-              .select('full_name, avatar_url')
+              .select('full_name, avatar_url, role, students(department), faculty(department)')
               .eq('id', row.sender_id)
               .maybeSingle()
-              .then(({ data: senderRow }) => {
+              .then(({ data }) => {
+                const senderRow = data as DbSender | null;
                 if (!senderRow) return;
+                const role = senderRow.role
+                  ? senderRow.role.charAt(0).toUpperCase() + senderRow.role.slice(1)
+                  : undefined;
                 setStudentNotifications((prev) =>
                   prev.map((n) =>
                     n.id === newItem.id
-                      ? { ...n, senderName: senderRow.full_name ?? undefined, senderAvatarUrl: senderRow.avatar_url ?? undefined }
+                      ? {
+                          ...n,
+                          senderName: senderRow.full_name ?? undefined,
+                          senderAvatarUrl: senderRow.avatar_url ?? undefined,
+                          senderRole: role,
+                          senderDepartment: senderDepartment(senderRow),
+                        }
                       : n
                   )
                 );
               });
           }
           if (soundEnabledRef.current) {
-            try {
-              notificationSoundPlayer.seekTo(0);
-              notificationSoundPlayer.play();
-            } catch {
-              // Never let sound playback failures (e.g. unsupported
-              // simulator) block the notification itself.
-            }
+            // Never let sound playback failures block the notification itself.
+            void playNotificationSoundRef.current();
           }
         }
       )
@@ -1048,10 +1086,13 @@ function AppContent() {
   const [profileMode, setProfileMode] = useState<'view' | 'book'>('view');
   // Screen the + button was pressed on, so Back returns there.
   const [bookInstructorsReturn, setBookInstructorsReturn] = useState<Screen>('home');
-  // The only instructors a student can book: the ones from their own department.
-  const sameDepartmentFaculty = facultyDirectory.filter((f) =>
-    isSameDepartment(f.department, studentProfile.department)
-  );
+  // Every instructor can be booked. The student's own department is listed
+  // first, then everyone else alphabetically.
+  const bookableFaculty = [...facultyDirectory].sort((a, b) => {
+    const aSame = isSameDepartment(a.department, studentProfile.department) ? 0 : 1;
+    const bSame = isSameDepartment(b.department, studentProfile.department) ? 0 : 1;
+    return aSame - bSame || a.name.localeCompare(b.name);
+  });
 
   useEffect(() => {
     if (!session) {
@@ -1565,7 +1606,7 @@ function AppContent() {
           sendNotification(session.user.id, {
             icon: 'notifications-outline',
             title: 'Your Appointment Is Coming Up',
-            description: `Your appointment with ${facultyName} starts at ${timeLabel}. The queue is now open — your appointment is on the way.`,
+            description: `Your appointment with ${facultyName}${appointment.purpose || appointment.category ? ` for ${appointment.purpose || appointment.category}` : ''} starts at ${timeLabel}. The queue is now open — please be ready.`,
           });
           sendNotification(bookedFacultyId, {
             icon: 'notifications-outline',
@@ -1786,8 +1827,15 @@ function AppContent() {
 
   // Today's upcoming appointments (sorted), used for FacultyHomeScreen's
   // "Today's Overview" stat and "Today's Schedule" list.
+  // Only approved appointments belong here (and in the queue); ones still
+  // awaiting the faculty's approval stay in the Directory until approved.
   const todaysFacultyAppointments = facultyAppointments
-    .filter((a) => a.status === 'upcoming' && a.dateKey === toDateKey(nowTick))
+    .filter(
+      (a) =>
+        a.status === 'upcoming' &&
+        a.dateKey === toDateKey(nowTick) &&
+        (a.facultyApprovalStatus ?? 'approved') === 'approved'
+    )
     .sort((a, b) => (a.startTime24 ?? '').localeCompare(b.startTime24 ?? ''));
 
   const todaysFacultyQueueAppointment =
@@ -2986,11 +3034,20 @@ function AppContent() {
       await supabase.from('queue_entries').delete().eq('appointment_id', appointment.id);
 
       if (appointment.studentUserId) {
-        sendNotification(appointment.studentUserId, {
-          icon: 'checkmark-circle-outline',
-          title: 'Appointment Approved',
-          description: `${facultyProfile.name} approved your appointment on ${appointment.date} at ${appointment.time}.`,
-        });
+        sendNotification(
+          appointment.studentUserId,
+          approvedMessage(
+            { name: facultyProfile.name, department: facultyProfile.fullDepartment || facultyProfile.department, role: 'Faculty' },
+            { purpose: appointment.purpose, category: appointment.category },
+            formatWhen({
+              dateKey: appointment.dateKey,
+              start24: appointment.startTime24,
+              end24: appointment.endTime24,
+              dateLabel: appointment.date,
+              timeLabel: appointment.time,
+            })
+          )
+        );
       }
 
       setFacultyAppointments((prev) =>
@@ -3051,11 +3108,20 @@ function AppContent() {
       if (queueError) console.log('Failed to remove declined queue entry:', queueError.message);
 
       if (appointment.studentUserId) {
-        sendNotification(appointment.studentUserId, {
-          icon: 'close-circle-outline',
-          title: 'Appointment Declined',
-          description: `${facultyProfile.name} declined your appointment on ${appointment.date} at ${appointment.time}.`,
-        });
+        sendNotification(
+          appointment.studentUserId,
+          declinedMessage(
+            { name: facultyProfile.name, department: facultyProfile.fullDepartment || facultyProfile.department, role: 'Faculty' },
+            { purpose: appointment.purpose, category: appointment.category },
+            formatWhen({
+              dateKey: appointment.dateKey,
+              start24: appointment.startTime24,
+              end24: appointment.endTime24,
+              dateLabel: appointment.date,
+              timeLabel: appointment.time,
+            })
+          )
+        );
       }
 
       setFacultyAppointments((prev) =>
@@ -3108,11 +3174,20 @@ function AppContent() {
       );
 
       if (appt.studentUserId) {
-        sendNotification(appt.studentUserId, {
-          icon: 'close-circle-outline',
-          title: 'Appointment Cancelled',
-          description: `${facultyProfile.name} cancelled your appointment on ${appt.date} at ${appt.time}. Reason: ${reason}`,
-        });
+        sendNotification(
+          appt.studentUserId,
+          canceledMessage(
+            { name: facultyProfile.name, department: facultyProfile.fullDepartment || facultyProfile.department, role: 'Faculty' },
+            formatWhen({
+              dateKey: appt.dateKey,
+              start24: appt.startTime24,
+              end24: appt.endTime24,
+              dateLabel: appt.date,
+              timeLabel: appt.time,
+            }),
+            reason
+          )
+        );
       }
 
       setFacultyActionResult({
@@ -3177,13 +3252,20 @@ function AppContent() {
       const [dateLabel = appt.date, timeLabel = ''] = appt.date.split(' · ');
 
       if (appt.facultyId) {
-        sendNotification(appt.facultyId, {
-          icon: 'close-circle-outline',
-          title: 'Appointment Cancelled',
-          description:
-            `${studentProfile.name} cancelled their appointment on ${dateLabel} at ${timeLabel}.` +
-            (reason ? `\n\nReason: ${reason}` : ''),
-        });
+        sendNotification(
+          appt.facultyId,
+          canceledMessage(
+            { name: studentProfile.name, department: studentProfile.department, role: 'Student' },
+            formatWhen({
+              dateKey: appt.dateKey,
+              start24: appt.startTime24,
+              end24: appt.endTime24,
+              dateLabel,
+              timeLabel,
+            }),
+            reason
+          )
+        );
       }
 
       setStudentBookingResult({
@@ -3359,11 +3441,18 @@ function AppContent() {
       await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
 
       if (appt.facultyId) {
-        sendNotification(appt.facultyId, {
-          icon: 'calendar-outline',
-          title: 'Appointment Rescheduled',
-          description: `${studentProfile.name} moved their appointment to ${selection.dateLabel} at ${bookedTimeRangeLabel}.`,
-        });
+        sendNotification(
+          appt.facultyId,
+          rescheduledMessage(
+            { name: studentProfile.name, department: studentProfile.department, role: 'Student' },
+            { purpose: appt.purpose, category: appt.category },
+            formatWhen({
+              dateKey: realDateKey,
+              start24: newStartTime24,
+              end24: newEndTime24,
+            })
+          )
+        );
       }
 
       if (confirmedBooking?.bookingId === appt.id) {
@@ -3528,13 +3617,19 @@ function AppContent() {
       );
 
       if (appt.studentUserId) {
-        sendNotification(appt.studentUserId, {
-          icon: 'calendar-outline',
-          title: 'Appointment Rescheduled',
-          description: isOnline
-            ? `Your appointment with ${facultyProfile.name} was rescheduled to ${data.dateLabel} at ${bookedTimeRangeLabel}. Reason: ${data.reason}. New meeting link: ${data.meetingLink}`
-            : `Your appointment with ${facultyProfile.name} was rescheduled to ${data.dateLabel} at ${bookedTimeRangeLabel}. Reason: ${data.reason}.`,
-        });
+        sendNotification(
+          appt.studentUserId,
+          rescheduledMessage(
+            { name: facultyProfile.name, department: facultyProfile.fullDepartment || facultyProfile.department, role: 'Faculty' },
+            { purpose: appt.purpose, category: appt.category },
+            formatWhen({
+              dateKey: realDateKey,
+              start24: newStartTime24,
+              end24: newEndTime24,
+            }),
+            { reason: data.reason, meetingLink: isOnline ? data.meetingLink : undefined }
+          )
+        );
       }
 
       setFacultyActionResult({
@@ -3967,7 +4062,7 @@ function AppContent() {
 
         {screen === 'bookInstructors' && (
           <BookInstructorScreen
-            faculty={sameDepartmentFaculty}
+            faculty={bookableFaculty}
             studentDepartment={studentProfile.department}
             loading={facultyDirectoryLoading}
             onBack={() => setScreen(bookInstructorsReturn)}
@@ -4027,14 +4122,6 @@ function AppContent() {
             onBack={() => setScreen(isChoosingAfterReject ? 'home' : 'facultyProfile')}
             onContinue={async (selection) => {
               if (!session || !selectedFaculty) return;
-
-              // New bookings are limited to the student's own department. (Picking a new
-              // time after a rejected reschedule is for an existing appointment, so it is exempt.)
-              if (!isChoosingAfterReject && !isSameDepartment(selectedFaculty.department, studentProfile.department)) {
-                showToast('You can only book instructors from your own department.');
-                setScreen('bookInstructors');
-                return;
-              }
 
               if (!(await isFacultyAcceptingBookings(selectedFaculty.id))) {
                 const unavailable = { ...selectedFaculty, status: 'unavailable' as const };
@@ -4164,11 +4251,14 @@ function AppContent() {
                 return;
               }
 
-              sendNotification(selectedFaculty.id, {
-                icon: 'calendar-outline',
-                title: 'New Appointment',
-                description: `${studentProfile.name} booked an appointment on ${dayInfo?.fullLabel ?? realDateKey} at ${bookedTimeRangeLabel}.`,
-              });
+              sendNotification(
+                selectedFaculty.id,
+                bookedMessage(
+                  { name: studentProfile.name, department: studentProfile.department },
+                  { purpose: selection.purpose, category: 'Consultation' },
+                  formatWhen({ dateKey: realDateKey, start24: newStartTime24, end24: newEndTime24 })
+                )
+              );
 
               setScheduleByDate(updated);
               setConfirmedBooking({
