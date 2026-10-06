@@ -83,13 +83,13 @@ export function approvedMessage(faculty: Actor, subject: Subject, when: string):
   return {
     icon: 'checkmark-circle-outline',
     title: `Approved by ${faculty.name}`,
-    description: `${faculty.name} approved your appointment for ${subjectOf(subject)} on ${when}.`,
+    description: `${actorLabel(faculty, false)} approved your appointment for ${subjectOf(subject)} on ${when}.`,
   };
 }
 
 // Student view: faculty declined.
 export function declinedMessage(faculty: Actor, subject: Subject, when: string, reason?: string | null): Built {
-  const base = `${faculty.name} declined your appointment for ${subjectOf(subject)} on ${when}.`;
+  const base = `${actorLabel(faculty, false)} declined your appointment for ${subjectOf(subject)} on ${when}.`;
   return {
     icon: 'close-circle-outline',
     title: `Declined by ${faculty.name}`,
@@ -117,4 +117,13 @@ export function rescheduledMessage(
   if ((extra?.reason ?? '').trim()) description += ` Reason: ${stop(extra!.reason!.trim())}`;
   if ((extra?.meetingLink ?? '').trim()) description += ` New meeting link: ${extra!.meetingLink!.trim()}`;
   return { icon: 'calendar-outline', title: `Reschedule from ${by.name}`, description };
+}
+
+// Student view: faculty finished the consultation.
+export function completedMessage(faculty: Actor, subject: Subject, when: string): Built {
+  return {
+    icon: 'checkmark-circle-outline',
+    title: `Completed with ${faculty.name}`,
+    description: `${actorLabel(faculty, false)} completed your appointment for ${subjectOf(subject)} on ${when}.`,
+  };
 }

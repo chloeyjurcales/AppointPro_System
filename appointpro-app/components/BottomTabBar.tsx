@@ -9,7 +9,7 @@ import useKeyboardVisible from './useKeyboardVisible';
 export type TabKey = 'home' | 'directory' | 'appointments' | 'notifications' | 'profile';
 
 type BottomTabBarProps = {
-  // null = none of the tabs is highlighted (e.g. on the Book an Appointment screen).
+  // null means no tab is highlighted (e.g. the booking flow).
   active: TabKey | null;
   onChange?: (tab: TabKey) => void;
 };

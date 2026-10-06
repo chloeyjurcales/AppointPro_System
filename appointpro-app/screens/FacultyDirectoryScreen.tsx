@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
+import DeclineReasonModal from '../components/DeclineReasonModal';
 
 type AppointmentStatus = 'upcoming' | 'pending' | 'completed' | 'cancelled';
 type ConsultationMode = 'face-to-face' | 'online';
@@ -230,7 +231,8 @@ type FacultyDirectoryScreenProps = {
   onReschedulePress?: (appointment: StudentAppointment) => void;
   onCancelPress?: (appointment: StudentAppointment) => void;
   onApprovePress?: (appointment: StudentAppointment) => void;
-  onDeclinePress?: (appointment: StudentAppointment) => void;
+  // `reason` is the optional note the faculty typed; it goes to the student.
+  onDeclinePress?: (appointment: StudentAppointment, reason?: string) => void;
   onTabChange?: (tab: FacultyTabKey) => void;
   onMenuPress?: () => void;
 };
@@ -298,6 +300,8 @@ export default function FacultyDirectoryScreen({
 }: FacultyDirectoryScreenProps) {
   const [activeFilter, setActiveFilter] = useState<AppointmentStatus>('upcoming');
   const [openGroupKey, setOpenGroupKey] = useState<string | null>(null);
+  // The pending request the faculty is about to decline (opens the reason pop-up).
+  const [declineTarget, setDeclineTarget] = useState<StudentAppointment | null>(null);
 
   const source = appointments ?? DEFAULT_APPOINTMENTS;
 
@@ -406,16 +410,7 @@ export default function FacultyDirectoryScreen({
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, styles.actionButtonDanger]}
-              onPress={() =>
-                Alert.alert(
-                  'Decline this appointment?',
-                  `Are you sure you want to decline ${item.studentName}'s appointment on ${item.date}, ${item.time}? ${item.studentName} will be notified.`,
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Yes, Decline', style: 'destructive', onPress: () => onDeclinePress?.(item) },
-                  ]
-                )
-              }
+              onPress={() => setDeclineTarget(item)}
             >
               <Text style={styles.actionButtonDangerText}>Decline</Text>
             </TouchableOpacity>
@@ -546,6 +541,19 @@ export default function FacultyDirectoryScreen({
         </>
       )}
       </KeyboardAvoidingView>
+
+      <DeclineReasonModal
+        visible={!!declineTarget}
+        studentName={declineTarget?.studentName ?? ''}
+        studentPhotoUri={declineTarget?.photoUri}
+        summary={declineTarget ? `${declineTarget.date}, ${declineTarget.time}` : ''}
+        onClose={() => setDeclineTarget(null)}
+        onConfirm={(reason) => {
+          const target = declineTarget;
+          setDeclineTarget(null);
+          if (target) onDeclinePress?.(target, reason);
+        }}
+      />
       <FacultyBottomTabBar active="directory" onChange={onTabChange} />
     </SafeAreaView>
   );
