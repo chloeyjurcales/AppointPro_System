@@ -432,6 +432,7 @@ type FacultyDirectoryMember = {
   facultyCode: string | null;
   role: string;
   department: string;
+  consultationTypes: string;
   status: FacultyDirectoryStatus;
   avatarUrl: string | null;
 };
@@ -443,6 +444,7 @@ type DbDirectoryRow = {
   role_title: string;
   faculty_id: string | null;
   is_available: boolean;
+  consultation_types: string | null;
   profiles:
     | { full_name: string; email: string | null; avatar_url: string | null }
     | { full_name: string; email: string | null; avatar_url: string | null }[]
@@ -467,7 +469,7 @@ function DirectoryTab({
     const load = () => {
       supabase
         .from('faculty')
-        .select('profile_id, faculty_id, department, role_title, is_available, profiles ( full_name, email, avatar_url )')
+        .select('profile_id, faculty_id, department, role_title, is_available, consultation_types, profiles ( full_name, email, avatar_url )')
         .then(({ data, error }) => {
           if (!isMounted) return;
           if (error) {
@@ -490,6 +492,8 @@ function DirectoryTab({
                 facultyCode: row.faculty_id ?? null,
                 role: row.role_title,
                 department: row.department ?? '—',
+                consultationTypes:
+                  row.consultation_types ?? DEFAULT_CONSULTATION_TYPES,
                 status: row.is_available ? 'Available' : 'Unavailable',
               };
             }),
@@ -624,6 +628,10 @@ function DirectoryTab({
                 <dd>{selectedMember.department}</dd>
               </div>
               <div>
+                <dt>Consultation types</dt>
+                <dd>{selectedMember.consultationTypes || '—'}</dd>
+              </div>
+              <div>
                 <dt>Faculty ID</dt>
                 <dd>{selectedMember.facultyCode || '—'}</dd>
               </div>
@@ -643,7 +651,11 @@ type PersonalInfo = {
   name: string;
   email: string;
   department: string;
+  consultationTypes: string;
 };
+
+// Same default the mobile app shows when a faculty hasn't set this yet.
+const DEFAULT_CONSULTATION_TYPES = 'Face-to-Face · Online';
 
 type DbProfileRow = { full_name: string; email: string; avatar_url: string | null };
 type DbFacultyRow = {
@@ -651,6 +663,7 @@ type DbFacultyRow = {
   department: string | null;
   role_title: string;
   is_available: boolean;
+  consultation_types: string | null;
 };
 
 function ProfileTab({
@@ -670,6 +683,7 @@ function ProfileTab({
     name: '',
     email: session.user.email ?? '',
     department: '',
+    consultationTypes: DEFAULT_CONSULTATION_TYPES,
   });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
@@ -690,7 +704,7 @@ function ProfileTab({
         .single(),
       supabase
         .from('faculty')
-        .select('faculty_id, department, role_title, is_available')
+        .select('faculty_id, department, role_title, is_available, consultation_types')
         .eq('profile_id', facultyId)
         .single(),
     ]).then(([profileRes, facultyRes]) => {
@@ -710,6 +724,8 @@ function ProfileTab({
         name: profileData?.full_name ?? '',
         email: profileData?.email ?? session.user.email ?? '',
         department: facultyData?.department ?? '',
+        consultationTypes:
+          facultyData?.consultation_types ?? DEFAULT_CONSULTATION_TYPES,
       };
 
       setSavedInfo(info);
@@ -818,7 +834,11 @@ function ProfileTab({
 
     const { error: facultyError } = await supabase
       .from('faculty')
-      .update({ department: form.department, is_available: formAvailable })
+      .update({
+        department: form.department,
+        is_available: formAvailable,
+        consultation_types: form.consultationTypes.trim(),
+      })
       .eq('profile_id', facultyId);
 
     setSaving(false);
@@ -928,6 +948,19 @@ function ProfileTab({
               />
             </div>
 
+            <div className="fv-edit-field">
+              <label htmlFor="pi-consultation-types">Consultation types</label>
+              <input
+                id="pi-consultation-types"
+                type="text"
+                value={form.consultationTypes}
+                onChange={(event) =>
+                  updateField('consultationTypes')(event.target.value)
+                }
+                placeholder="e.g. Face-to-Face, Online"
+              />
+            </div>
+
             <p className="fv-edit-password-hint">
               Want to change your password? That's now in Settings.
             </p>
@@ -985,6 +1018,10 @@ function ProfileTab({
               <div className="fv-info-row">
                 <dt>Department:</dt>
                 <dd>{savedInfo.department || '—'}</dd>
+              </div>
+              <div className="fv-info-row">
+                <dt>Consultation:</dt>
+                <dd>{savedInfo.consultationTypes || '—'}</dd>
               </div>
               <div className="fv-info-row">
                 <dt>Availability:</dt>

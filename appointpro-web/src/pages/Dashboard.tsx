@@ -5,6 +5,7 @@ import AppointmentsView from './AppointmentsView';
 import FacultyView, { type FacultyTab } from './FacultyView';
 import NotificationsView, { type Notification } from './NotificationsView';
 import SettingsView from './SettingsView';
+import SlotIQModal from './SlotIQModal';
 import './Dashboard.css';
 
 type DashboardProps = {
@@ -234,12 +235,14 @@ export default function Dashboard({
     };
   }, [user.id]);
 
-  // SlotIQ isn't built yet — its Quick Action just shows this short notice.
-  const [slotIqNotice, setSlotIqNotice] = useState(false);
+  // SlotIQ: the Quick Action opens the modal; once a schedule is saved, the
+  // result is shown in a short toast.
+  const [slotIqOpen, setSlotIqOpen] = useState(false);
+  const [slotIqNotice, setSlotIqNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slotIqNotice) return;
-    const timer = window.setTimeout(() => setSlotIqNotice(false), 3500);
+    const timer = window.setTimeout(() => setSlotIqNotice(null), 5000);
     return () => window.clearTimeout(timer);
   }, [slotIqNotice]);
 
@@ -740,7 +743,7 @@ export default function Dashboard({
                     <button
                       type="button"
                       className="db-quick-action"
-                      onClick={() => setSlotIqNotice(true)}
+                      onClick={() => setSlotIqOpen(true)}
                     >
                       <span
                         className="db-quick-action-icon"
@@ -757,14 +760,13 @@ export default function Dashboard({
                   <div className="db-toast" role="status" aria-live="polite">
                     <SparkleIcon />
                     <span>
-                      <strong>SlotIQ</strong> is not available yet — it's coming
-                      soon.
+                      <strong>SlotIQ:</strong> {slotIqNotice}
                     </span>
                     <button
                       type="button"
                       className="db-toast-close"
                       aria-label="Dismiss"
-                      onClick={() => setSlotIqNotice(false)}
+                      onClick={() => setSlotIqNotice(null)}
                     >
                       ×
                     </button>
@@ -821,6 +823,17 @@ export default function Dashboard({
           )}
         </main>
       </div>
+
+      {slotIqOpen && (
+        <SlotIQModal
+          facultyId={facultyId}
+          onClose={() => setSlotIqOpen(false)}
+          onSaved={(message) => {
+            setSlotIqOpen(false);
+            setSlotIqNotice(message);
+          }}
+        />
+      )}
     </div>
   );
 }
