@@ -603,8 +603,8 @@ export default function Dashboard({
       </aside>
 
       <div className="db-body">
-        <header className="db-topbar">
-          {activeNav === 'faculty' ? (
+        {activeNav === 'faculty' && (
+          <header className="db-topbar">
             <div className="db-search">
               <SearchIcon />
               <input
@@ -614,32 +614,8 @@ export default function Dashboard({
                 onChange={(event) => setFacultySearch(event.target.value)}
               />
             </div>
-          ) : (
-            <div />
-          )}
-
-          <div className="db-topbar-icons">
-            <button
-              type="button"
-              className="db-icon-btn"
-              aria-label="Notifications"
-              onClick={() => handleNavClick('notifications')}
-            >
-              <BellIcon />
-              {unreadNotificationCount > 0 && <span className="db-icon-dot" />}
-            </button>
-
-            <button
-              type="button"
-              className="db-avatar db-avatar-button"
-              aria-label="Open my profile"
-              title="View my profile"
-              onClick={() => handleNavClick('faculty', 'profile')}
-            >
-              {avatarUrl ? <img src={avatarUrl} alt="" /> : initials}
-            </button>
-          </div>
-        </header>
+          </header>
+        )}
 
         <main className="db-main">
           {activeNav === 'home' && (

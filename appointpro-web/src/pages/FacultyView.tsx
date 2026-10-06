@@ -2098,6 +2098,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
             <div className="fv-card fv-active-schedules-card">
               <h3>Active Weekly Schedules</h3>
 
+              <div className="fv-recurring-list">
               {recurring.map((rule) => (
                 <div key={rule.id} className="fv-recurring-row">
                   <div>
@@ -2119,6 +2120,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           )
         )}

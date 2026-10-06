@@ -18,6 +18,7 @@ type Appointment = {
   date: string;
   time: string;
   studentName: string;
+  studentAvatarUrl: string | null;
   studentInfo: string;
   reason: string;
   status: AppointmentStatus;
@@ -161,7 +162,10 @@ type DbAppointment = {
     student_id: string;
     department: string | null;
     year_level: string | null;
-    profiles: { full_name: string } | { full_name: string }[] | null;
+    profiles:
+      | { full_name: string; avatar_url: string | null }
+      | { full_name: string; avatar_url: string | null }[]
+      | null;
   } | null;
   // The parent slot's own time range, when this appointment was booked
   // into a shared slot — used to reconstruct the "Live Queue" block, since
@@ -205,6 +209,38 @@ function formatDbDateLabel(dateKey: string): string {
   });
 }
 
+function StudentAvatar({
+  name,
+  url,
+  large = false,
+}: {
+  name: string;
+  url: string | null;
+  large?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase() || '?';
+  return (
+    <span
+      className={`av-avatar${large ? ' av-avatar-lg' : ''}`}
+      aria-hidden="true"
+    >
+      {url && !failed ? (
+        <img src={url} alt="" onError={() => setFailed(true)} />
+      ) : (
+        initials
+      )}
+    </span>
+  );
+}
+
 function buildStudentInfo(
   department: string | null | undefined,
   yearLevel: string | null | undefined,
@@ -239,6 +275,7 @@ function mapDbAppointment(row: DbAppointment): Appointment {
     id: row.id,
     referenceNo: row.reference_no ?? '',
     studentName: profile?.full_name ?? 'Unknown Student',
+    studentAvatarUrl: profile?.avatar_url ?? null,
     studentInfo: buildStudentInfo(
       student?.department,
       student?.year_level,
@@ -335,7 +372,7 @@ export default function AppointmentsView({
         .select(
           `id, student_id, slot_id, date, start_time, end_time, duration_minutes,
            category, purpose, mode, location, status, reference_no, faculty_approval_status,
-           students ( student_id, department, year_level, profiles ( full_name ) ),
+           students ( student_id, department, year_level, profiles ( full_name, avatar_url ) ),
            availability_slots ( start_time, end_time )`,
         )
         .eq('faculty_id', facultyId)
@@ -1101,10 +1138,18 @@ export default function AppointmentsView({
                   </div>
                 </td>
                 <td className="av-student">
-                  {appt.studentName}
-                  {appt.referenceNo && (
-                    <div className="av-ref">Ref: {appt.referenceNo}</div>
-                  )}
+                  <div className="av-student-cell">
+                    <StudentAvatar
+                      name={appt.studentName}
+                      url={appt.studentAvatarUrl}
+                    />
+                    <div className="av-student-text">
+                      <span className="av-student-name">{appt.studentName}</span>
+                      {appt.referenceNo && (
+                        <div className="av-ref">Ref: {appt.referenceNo}</div>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 <td className="av-reason">{appt.reason}</td>
                 <td>
@@ -1189,7 +1234,14 @@ export default function AppointmentsView({
                 <div className="av-details-grid">
                   <div className="av-details-item av-details-item-wide">
                     <span className="av-details-label">Student</span>
-                    <strong>{modal.appointment.studentName}</strong>
+                    <div className="av-student-cell">
+                      <StudentAvatar
+                        name={modal.appointment.studentName}
+                        url={modal.appointment.studentAvatarUrl}
+                        large
+                      />
+                      <strong>{modal.appointment.studentName}</strong>
+                    </div>
                     {modal.appointment.studentInfo && (
                       <span className="av-details-value-muted">
                         {modal.appointment.studentInfo}
