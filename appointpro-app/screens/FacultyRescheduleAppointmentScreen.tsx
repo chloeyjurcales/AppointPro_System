@@ -13,12 +13,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import ProfileAvatar from '../components/ProfileAvatar';
+import StudentClassScheduleCard from '../components/StudentClassScheduleCard';
 import {
   WEEK_DAYS,
   ScheduleSlot,
   isSlotFull,
   getFittingDurationOptions,
+  findNextAvailableOffset,
+  getBookedTimeRangeLabel,
 } from '../data/facultySchedule';
+import {
+  ClassBlock,
+  ProposedSlot,
+  clockLabelTo24h,
+  dayOfWeekFromDateKey,
+  describeConflict,
+  findScheduleConflict,
+} from '../lib/classSchedule';
 
 type FacultyRescheduleAppointmentScreenProps = {
   scheduleByDate: Record<number, ScheduleSlot[]>;
@@ -31,6 +42,10 @@ type FacultyRescheduleAppointmentScreenProps = {
   originalLocation?: string;
   originalMode?: string;
   durationMinutes?: number;
+  // The student's recurring weekly classes. A new time that overlaps one of them is invalid.
+  studentClasses?: ClassBlock[];
+  studentClassesLoading?: boolean;
+  studentClassesError?: boolean;
   onBack?: () => void;
   onConfirm?: (data: {
     date: number;
@@ -53,6 +68,9 @@ export default function FacultyRescheduleAppointmentScreen({
   originalLocation = 'Room 305, CHMC Main Campus',
   originalMode = 'Face-to-Face',
   durationMinutes = 30,
+  studentClasses = [],
+  studentClassesLoading = false,
+  studentClassesError = false,
   onBack,
   onConfirm,
 }: FacultyRescheduleAppointmentScreenProps) {
@@ -89,9 +107,34 @@ export default function FacultyRescheduleAppointmentScreen({
   const slotFits = (slot: ScheduleSlot) =>
     !isSlotFull(slot) && getFittingDurationOptions(slot).some((o) => o.minutes === durationMinutes);
 
+  // --- Student class conflicts ---------------------------------------------
+  // The time that would actually be booked inside a slot (the same first-free-spot rule the
+  // save step uses), checked against the student's classes on that weekday.
+  const selectedDayOfWeek = selectedDay ? dayOfWeekFromDateKey(selectedDay.dateKey) : undefined;
+
+  const conflictFor = (slot: ScheduleSlot): ClassBlock | null => {
+    if (selectedDayOfWeek === undefined) return null;
+    const offset = findNextAvailableOffset(slot, durationMinutes);
+    if (offset === null) return null;
+    const [startLabel, endLabel] = getBookedTimeRangeLabel(slot, offset, durationMinutes).split(' - ');
+    const proposed: ProposedSlot = {
+      dayOfWeek: selectedDayOfWeek,
+      startTime: clockLabelTo24h(startLabel),
+      endTime: clockLabelTo24h(endLabel),
+    };
+    return findScheduleConflict(studentClasses, proposed);
+  };
+
+  const selectedConflict = selectedSlot ? conflictFor(selectedSlot) : null;
+  const conflictMessage = selectedConflict ? describeConflict(selectedConflict) : null;
+  // Until the classes are known we cannot say the new time is safe, so confirming stays off.
+  const classesUnverified = studentClassesLoading || studentClassesError;
+
   const canConfirm =
     reason.trim().length > 0 &&
     !!selectedSlot &&
+    !selectedConflict &&
+    !classesUnverified &&
     (!isNewSlotOnline || meetingLink.trim().length > 0);
 
   const handleConfirm = () => {
@@ -142,6 +185,16 @@ export default function FacultyRescheduleAppointmentScreen({
               </>
             )}
           </View>
+
+          <Text style={styles.sectionTitle}>Student's Class Schedule</Text>
+          <StudentClassScheduleCard
+            studentName={studentName}
+            classes={studentClasses}
+            loading={studentClassesLoading}
+            error={studentClassesError}
+            selectedDayOfWeek={selectedDayOfWeek}
+            conflictBlockId={selectedConflict?.id}
+          />
 
           <Text style={styles.sectionTitle}>Reason for Reschedule</Text>
           <TextInput
@@ -206,6 +259,7 @@ export default function FacultyRescheduleAppointmentScreen({
           ) : (
             slotsForDate.map((slot) => {
               const fits = slotFits(slot);
+              const slotConflict = fits ? conflictFor(slot) : null;
               const isSelected = slot.id === selectedSlotId;
               return (
                 <TouchableOpacity
@@ -217,7 +271,7 @@ export default function FacultyRescheduleAppointmentScreen({
                   ]}
                   onPress={() => fits && setSelectedSlotId(slot.id)}
                   disabled={!fits}
-                  activeOpacity={fits ? 0.75 : 1}
+                  activeOpacity={1}
                 >
                   <View style={[styles.radioOuter, isSelected && styles.radioOuterActive]}>
                     {isSelected && <View style={styles.radioInner} />}
@@ -231,9 +285,32 @@ export default function FacultyRescheduleAppointmentScreen({
                     </Text>
                   </View>
                   {!fits && <Text style={styles.noFitTag}>Doesn't fit</Text>}
+                  {slotConflict && <Text style={styles.conflictTag}>Student has class</Text>}
                 </TouchableOpacity>
               );
             })
+          )}
+
+          {conflictMessage && (
+            <View style={styles.conflictCard} accessibilityRole="alert">
+              <Ionicons name="alert-circle" size={20} color="#A3261B" />
+              <View style={styles.conflictTextWrap}>
+                <Text style={styles.conflictTitle}>{conflictMessage.title}</Text>
+                <Text style={styles.conflictBody}>{conflictMessage.body}</Text>
+              </View>
+            </View>
+          )}
+
+          {studentClassesError && (
+            <View style={styles.conflictCard} accessibilityRole="alert">
+              <Ionicons name="alert-circle" size={20} color="#A3261B" />
+              <View style={styles.conflictTextWrap}>
+                <Text style={styles.conflictTitle}>Can't check the student's classes</Text>
+                <Text style={styles.conflictBody}>
+                  The class schedule could not be loaded, so this appointment can't be rescheduled right now. Go back and try again.
+                </Text>
+              </View>
+            </View>
           )}
 
           {isNewSlotOnline && (
@@ -265,7 +342,7 @@ export default function FacultyRescheduleAppointmentScreen({
             style={[styles.confirmButton, !canConfirm && styles.confirmButtonDisabled]}
             onPress={handleConfirm}
             disabled={!canConfirm}
-            activeOpacity={0.85}
+            activeOpacity={1}
           >
             <Text style={styles.confirmButtonText}>Confirm Reschedule</Text>
           </TouchableOpacity>
@@ -276,6 +353,21 @@ export default function FacultyRescheduleAppointmentScreen({
 }
 
 const styles = StyleSheet.create({
+  conflictCard: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F5B7B1',
+    backgroundColor: '#FDECEA',
+  },
+  conflictTextWrap: { flex: 1 },
+  conflictTitle: { fontSize: 14, fontWeight: '800', color: '#A3261B' },
+  conflictBody: { marginTop: 2, fontSize: 13, lineHeight: 19, color: colors.textDark },
+  conflictTag: { fontSize: 11, fontWeight: '700', color: '#A3261B' },
   safeArea: { flex: 1, backgroundColor: colors.white },
   flex: { flex: 1 },
   header: {

@@ -21,6 +21,9 @@ import {
   getFittingDurationOptions,
 } from '../data/facultySchedule';
 import { toDateKey } from '../data/facultySlots';
+import SlotBookingCard from '../components/SlotBookingCard';
+import { ClassBlock, dayOfWeekFromDateKey } from '../lib/classSchedule';
+import { findStudentBookingConflict, toBookableSlot } from '../lib/bookingConflict';
 
 export type BookingSelection = {
   date: number;
@@ -51,6 +54,12 @@ type BookAppointmentScreenProps = {
   department?: string;
   initialDate?: number;
   initialSlotId?: string;
+  // The student's saved weekly classes. Slots that overlap one are shown as
+  // conflicts and can't be booked.
+  studentClasses?: ClassBlock[];
+  studentClassesLoading?: boolean;
+  // True when the classes could not be loaded, so conflicts can't be checked.
+  studentClassesError?: boolean;
 };
 
 export default function BookAppointmentScreen({
@@ -63,6 +72,9 @@ export default function BookAppointmentScreen({
   department = 'Computer Studies',
   initialDate,
   initialSlotId,
+  studentClasses = [],
+  studentClassesLoading = false,
+  studentClassesError = false,
 }: BookAppointmentScreenProps) {
   const todayKeyForDefault = toDateKey(new Date());
   const defaultDate =
@@ -80,6 +92,8 @@ export default function BookAppointmentScreen({
   const [selectedDurationMinutes, setSelectedDurationMinutes] = useState<number | undefined>();
   const [purpose, setPurpose] = useState('');
   const [userPickedDate, setUserPickedDate] = useState(false);
+  // Inline (static) explanation shown after tapping a conflicting slot.
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
 
   const isReschedule = mode === 'reschedule';
   // Belt-and-suspenders: even though the faculty schedule fed in here is
@@ -101,6 +115,15 @@ export default function BookAppointmentScreen({
   const selectedSlot = slotsForDate.find((s) => s.id === selectedSlotId);
   const availableCount = slotsForDate.length;
   const fittingOptions = selectedSlot ? getFittingDurationOptions(selectedSlot) : [];
+
+  // Which of the student's classes (if any) overlaps a slot on the selected day.
+  const selectedDayOfWeek = selectedDay ? dayOfWeekFromDateKey(selectedDay.dateKey) : 0;
+  const conflictFor = (slot: ScheduleSlot): ClassBlock | null => {
+    const bookable = toBookableSlot(selectedDayOfWeek, slot.startLabel, slot.totalMinutes);
+    return bookable ? findStudentBookingConflict(studentClasses, bookable) : null;
+  };
+  const selectedConflict = selectedSlot ? conflictFor(selectedSlot) : null;
+  const hasNoClassSchedule = !studentClassesLoading && !studentClassesError && studentClasses.length === 0;
 
   useEffect(() => {
     if (!selectedSlot) {
@@ -133,10 +156,14 @@ export default function BookAppointmentScreen({
     setUserPickedDate(true);
     setSelectedDate(date);
     setSelectedSlotId(undefined);
+    setBlockedMessage(null);
   };
 
   const canContinue =
-    !!selectedSlot && !!selectedDurationMinutes && (isReschedule || purpose.trim().length > 0);
+    !!selectedSlot &&
+    !selectedConflict &&
+    !!selectedDurationMinutes &&
+    (isReschedule || purpose.trim().length > 0);
 
   const handleContinue = () => {
     if (!selectedSlot || !selectedDay || !selectedDurationMinutes || !canContinue) return;
@@ -162,7 +189,7 @@ export default function BookAppointmentScreen({
         style={styles.flex}
       >
         <View style={styles.header}>
-          <TouchableOpacity onPress={onBack}>
+          <TouchableOpacity activeOpacity={1} onPress={onBack}>
             <Ionicons name="arrow-back" size={22} color={colors.textDark} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Book Appointment</Text>
@@ -189,7 +216,7 @@ export default function BookAppointmentScreen({
                 !isPastDay(d.dateKey) &&
                 (scheduleByDate[d.date] ?? []).some((s) => !isSlotFull(s));
               return (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={d.date}
                   style={[
                     styles.dateChip,
@@ -241,6 +268,40 @@ export default function BookAppointmentScreen({
 
           <Text style={styles.sectionTitle}>Select Time & Location</Text>
 
+          {studentClassesLoading && (
+            <View style={styles.infoBanner}>
+              <Ionicons name="time-outline" size={16} color="#475569" />
+              <Text style={styles.infoBannerText}>Checking your class schedule…</Text>
+            </View>
+          )}
+
+          {studentClassesError && (
+            <View style={styles.infoBanner}>
+              <Ionicons name="information-circle-outline" size={16} color="#475569" />
+              <Text style={styles.infoBannerText}>
+                We couldn't load your class schedule, so slots can't be checked against it right now. We'll check again
+                when you confirm.
+              </Text>
+            </View>
+          )}
+
+          {hasNoClassSchedule && (
+            <View style={styles.infoBanner}>
+              <Ionicons name="information-circle-outline" size={16} color="#475569" />
+              <Text style={styles.infoBannerText}>
+                You haven't saved your class schedule yet. Complete your schedule setup so we can stop you from
+                booking times that clash with your classes.
+              </Text>
+            </View>
+          )}
+
+          {!!blockedMessage && (
+            <View style={styles.errorBanner} accessibilityRole="alert">
+              <Ionicons name="alert-circle-outline" size={16} color="#B91C1C" />
+              <Text style={styles.errorBannerText}>{blockedMessage}</Text>
+            </View>
+          )}
+
           {allSlotsForDate.length === 0 ? (
             <View style={styles.emptySchedule}>
               <Ionicons name="calendar-outline" size={22} color={colors.textMuted} />
@@ -256,35 +317,25 @@ export default function BookAppointmentScreen({
               </Text>
             </View>
           ) : (
-            slotsForDate.map((slot) => {
-              const isSelected = slot.id === selectedSlotId;
-              const remaining = getRemainingMinutes(slot);
-              return (
-                <TouchableOpacity
-                  key={slot.id}
-                  style={[styles.slotCard, isSelected && styles.slotCardSelected]}
-                  onPress={() => setSelectedSlotId(slot.id)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[styles.radioOuter, isSelected && styles.radioOuterActive]}>
-                    {isSelected && <View style={styles.radioInner} />}
-                  </View>
-
-                  <View style={styles.slotTextWrap}>
-                    <Text style={styles.slotTime}>{slot.time}</Text>
-                    <View style={styles.slotMetaRow}>
-                      <Ionicons
-                        name={slot.mode === 'Online' ? 'wifi-outline' : 'location-outline'}
-                        size={12}
-                        color={colors.textMuted}
-                      />
-                      <Text style={styles.slotLocation}>{slot.location}</Text>
-                    </View>
-                    <Text style={styles.slotMode}>{remaining} min remaining</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+            slotsForDate.map((slot) => (
+              <SlotBookingCard
+                key={slot.id}
+                time={slot.time}
+                mode={slot.mode}
+                location={slot.location}
+                remainingMinutes={getRemainingMinutes(slot)}
+                isSelected={slot.id === selectedSlotId}
+                conflict={conflictFor(slot)}
+                onSelect={() => {
+                  setBlockedMessage(null);
+                  setSelectedSlotId(slot.id);
+                }}
+                onBlockedPress={(message) => {
+                  setSelectedSlotId(undefined);
+                  setBlockedMessage(message);
+                }}
+              />
+            ))
           )}
 
           {selectedSlot && (
@@ -295,7 +346,7 @@ export default function BookAppointmentScreen({
                   const fits = fittingOptions.some((o) => o.minutes === option.minutes);
                   const isActive = option.minutes === selectedDurationMinutes;
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={option.label}
                       style={[
                         styles.durationChip,
@@ -348,7 +399,7 @@ export default function BookAppointmentScreen({
           <TouchableOpacity
             style={[styles.continueButton, !canContinue && styles.continueButtonDisabled]}
             onPress={handleContinue}
-            activeOpacity={0.85}
+            activeOpacity={1}
             disabled={!canContinue}
           >
             <Text style={styles.continueButtonText}>
@@ -499,6 +550,41 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     paddingHorizontal: spacing.lg,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: spacing.sm,
+  },
+  infoBannerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#475569',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: spacing.sm,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+    color: '#B91C1C',
   },
   slotCard: {
     flexDirection: 'row',

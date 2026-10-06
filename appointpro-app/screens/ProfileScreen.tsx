@@ -29,6 +29,7 @@ type ProfileScreenProps = {
   photoUri?: string;
   onBack?: () => void;
   onPersonalInformation?: () => void;
+  onClassSchedule?: () => void;
   onAbout?: () => void;
   onSettings?: () => void;
   onLogout?: () => void;
@@ -48,6 +49,7 @@ export default function ProfileScreen({
   photoUri,
   onBack,
   onPersonalInformation,
+  onClassSchedule,
   onAbout,
   onSettings,
   onLogout,
@@ -65,6 +67,9 @@ export default function ProfileScreen({
 
   const menuItems: MenuItem[] = [
     { key: 'personal', icon: 'person-outline', label: 'Personal Information', onPress: onPersonalInformation },
+    ...(onClassSchedule
+      ? [{ key: 'classes', icon: 'calendar-outline' as const, label: 'My Class Schedule', onPress: onClassSchedule }]
+      : []),
     { key: 'settings', icon: 'settings-outline', label: 'Settings', onPress: onSettings },
     { key: 'about', icon: 'information-circle-outline', label: 'About AppointmentPro', onPress: onAbout },
   ];

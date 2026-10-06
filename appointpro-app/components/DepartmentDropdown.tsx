@@ -3,7 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'reac
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 
-export const DEPARTMENTS = ['CCS', 'CCJE', 'BSA', 'BSE'] as const;
+import { DEPARTMENT_OPTIONS, departmentKey } from '../lib/departments';
 
 type Props = {
   value: string;
@@ -13,7 +13,7 @@ type Props = {
   variant?: 'auth' | 'form';
 };
 
-/** Drop-down for choosing a department (CCS, CCJE, BSA or BSE). */
+/** Drop-down for choosing a department (see lib/departments.ts for the options). */
 export default function DepartmentDropdown({
   value,
   onChange,
@@ -31,7 +31,7 @@ export default function DepartmentDropdown({
         accessibilityRole="button"
         accessibilityLabel="Select department"
       >
-        <Text style={[styles.value, !value && styles.placeholder]} numberOfLines={1}>
+        <Text style={[styles.value, !value && styles.placeholder]}>
           {value || placeholder}
         </Text>
         <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
@@ -41,8 +41,10 @@ export default function DepartmentDropdown({
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>Select your department</Text>
-            {DEPARTMENTS.map((department) => {
-              const selected = department === value;
+            {DEPARTMENT_OPTIONS.map((option) => {
+              const department = option.label;
+              // Older accounts saved only the short code (e.g. "CCS"); still show it as selected.
+              const selected = departmentKey(value) === option.code;
               return (
                 <TouchableOpacity
                   key={department}
@@ -73,9 +75,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.inputBackground,
     borderRadius: 10,
   },
-  fieldAuth: { height: 48, paddingHorizontal: 12 },
-  fieldForm: { height: 46, paddingHorizontal: 14, marginBottom: spacing.md },
-  value: { flex: 1, fontSize: 14, color: colors.textDark },
+  fieldAuth: { minHeight: 48, paddingVertical: 8, paddingHorizontal: 12 },
+  fieldForm: { minHeight: 46, paddingVertical: 8, paddingHorizontal: 14, marginBottom: spacing.md },
+  value: { flex: 1, fontSize: 14, color: colors.textDark, paddingRight: 8 },
   placeholder: { color: '#9B9B9B' },
   backdrop: {
     flex: 1,

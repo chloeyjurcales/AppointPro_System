@@ -57,6 +57,13 @@ function generateCurrentWeek(): WeekDay[] {
 
 export const WEEK_DAYS: WeekDay[] = generateCurrentWeek();
 
+// WEEK_DAYS is built once when the app starts, so an app left open past
+// midnight on Saturday kept showing last week's dates. Calling this rebuilds the
+// same array in place (every screen already holds a reference to it).
+export function refreshWeekDays(): void {
+  WEEK_DAYS.splice(0, WEEK_DAYS.length, ...generateCurrentWeek());
+}
+
 export type DurationOption = { label: string; minutes: number };
 
 export const DURATION_OPTIONS: DurationOption[] = [

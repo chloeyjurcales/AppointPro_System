@@ -1,14 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,7 +35,7 @@ import {
 import { toDateKey } from '../data/facultySlots';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-// Each day starts with one class-time box; the + button adds more up to this limit.
+// A day starts with no classes; "Add class" adds a class time, up to this limit.
 const MAX_BOXES_PER_DAY = 6;
 // Show the week Monday -> Sunday.
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -64,8 +63,86 @@ function parseDateInput(value: string): string | null {
   return trimmed;
 }
 
-function dayLabel(days: number[]): string {
-  return days.map((day) => DAY_NAMES[day]).join(', ');
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2027-02-28" -> "Feb 28, 2027"
+function formatDateLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return `${MONTH_NAMES[m - 1]} ${d}, ${y}`;
+}
+
+const shortDay = (day: number) => DAY_NAMES[day].slice(0, 3);
+const timeRangeText = (range: { startTime: string; endTime: string }) =>
+  `${formatTime(range.startTime)} - ${formatTime(range.endTime)}`;
+
+const DURATION_CHOICES = ['15', '30', '45', '60'];
+const SEMESTER_CHOICES = [3, 4, 5, 6];
+
+// ---- Small static building blocks (no animation: Pressable only changes colour while pressed) ----
+type ButtonProps = {
+  label: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+};
+
+function Button({ label, icon, onPress, variant = 'primary', disabled }: ButtonProps) {
+  const primary = variant === 'primary';
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.button,
+        primary ? styles.buttonPrimary : styles.buttonSecondary,
+        pressed && (primary ? styles.buttonPrimaryPressed : styles.buttonSecondaryPressed),
+        disabled && styles.buttonDisabled,
+      ]}
+    >
+      {icon ? <Ionicons name={icon} size={18} color={primary ? colors.white : colors.primary} /> : null}
+      <Text style={[styles.buttonText, primary ? styles.buttonTextPrimary : styles.buttonTextSecondary]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+type BadgeTone = 'neutral' | 'success' | 'warning';
+function Badge({ label, tone = 'neutral', icon }: { label: string; tone?: BadgeTone; icon?: keyof typeof Ionicons.glyphMap }) {
+  const toneStyle = tone === 'success' ? styles.badgeSuccess : tone === 'warning' ? styles.badgeWarning : styles.badgeNeutral;
+  const textStyle = tone === 'success' ? styles.badgeTextSuccess : tone === 'warning' ? styles.badgeTextWarning : styles.badgeTextNeutral;
+  const iconColor = tone === 'success' ? colors.success : tone === 'warning' ? colors.danger : colors.textMuted;
+  return (
+    <View style={[styles.badge, toneStyle]}>
+      {icon ? <Ionicons name={icon} size={12} color={iconColor} /> : null}
+      <Text style={[styles.badgeText, textStyle]}>{label}</Text>
+    </View>
+  );
+}
+
+function SectionHeader({ step, title, helper }: { step: string; title: string; helper: string }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.stepBadge}>
+        <Text style={styles.stepBadgeText}>{step}</Text>
+      </View>
+      <View style={styles.sectionHeaderText}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Text style={styles.sectionHelper}>{helper}</Text>
+      </View>
+    </View>
+  );
+}
+
+function Field({ label, helper, children }: { label: string; helper?: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      {children}
+      {helper ? <Text style={styles.helper}>{helper}</Text> : null}
+    </View>
+  );
 }
 
 type Props = {
@@ -75,7 +152,6 @@ type Props = {
 };
 
 export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) {
-  const today = useMemo(() => toDateKey(new Date()), []);
   const [semesterEndDate, setSemesterEndDate] = useState(toDateKey(addMonths(new Date(), 4)));
   const [duration, setDuration] = useState('30');
   const [minSlotsPerDay, setMinSlotsPerDay] = useState('2');
@@ -86,20 +162,37 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const [dayInputs, setDayInputs] = useState<Record<number, TimeBox[]>>({});
   // Days consultations may be held on; default Monday-Friday.
   const [availableDays, setAvailableDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  // Consultations are only suggested inside this daily window.
-  const [windowInput, setWindowInput] = useState('8am-5pm');
+  // Consultations are only suggested inside this daily window (picked with dropdowns, 8:00 AM - 5:00 PM by default).
+  const [windowBox, setWindowBox] = useState<TimeBox>({
+    startHour: '8',
+    startMinute: '00',
+    startPeriod: 'AM',
+    endHour: '5',
+    endMinute: '00',
+    endPeriod: 'PM',
+  });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<SlotIQResult | null>(null);
+  // One step per screen so nothing needs scrolling past something else.
+  const [tab, setTab] = useState<'classes' | 'prefs' | 'results'>('classes');
+  // The checked end date the current result was generated for (the text box may be edited afterwards).
+  const [generatedEndDate, setGeneratedEndDate] = useState<string | null>(null);
   // Set when the faculty taps Generate; the confirm dialog reads from it.
   const [pendingOptions, setPendingOptions] = useState<SlotIQOptions | null>(null);
 
-  const parsedWindow = useMemo(() => parseWindowInput(windowInput), [windowInput]);
+  const parsedWindow = useMemo(
+    () =>
+      isTimeBoxComplete(windowBox)
+        ? parseWindowInput(timeBoxToText(windowBox))
+        : { range: null, error: 'Choose the hour, minute and AM/PM for both start and end.' },
+    [windowBox],
+  );
 
   const parsedDays = useMemo(
     () =>
       DAY_ORDER.map((day) => {
-        const boxes = (dayInputs[day] ?? [emptyTimeBox()]).map((timeBox) =>
+        const boxes = (dayInputs[day] ?? []).map((timeBox) =>
           // Half-picked times (e.g. hour chosen but no AM/PM yet) are flagged until every dropdown is set.
           !isTimeBoxEmpty(timeBox) && !isTimeBoxComplete(timeBox)
             ? { range: null, error: 'Pick the hour, minute and AM/PM for both start and end.' }
@@ -119,7 +212,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
   const setBox = (day: number, index: number, value: TimeBox) => {
     setDayInputs((prev) => {
-      const boxes = [...(prev[day] ?? [emptyTimeBox()])];
+      const boxes = [...(prev[day] ?? [])];
       boxes[index] = value;
       return { ...prev, [day]: boxes };
     });
@@ -127,7 +220,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
   const addBox = (day: number) => {
     setDayInputs((prev) => {
-      const boxes = prev[day] ?? [emptyTimeBox()];
+      const boxes = prev[day] ?? [];
       if (boxes.length >= MAX_BOXES_PER_DAY) return prev;
       return { ...prev, [day]: [...boxes, emptyTimeBox()] };
     });
@@ -135,8 +228,8 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
   const removeBox = (day: number, index: number) => {
     setDayInputs((prev) => {
-      const boxes = (prev[day] ?? [emptyTimeBox()]).filter((_, i) => i !== index);
-      return { ...prev, [day]: boxes.length ? boxes : [emptyTimeBox()] };
+      const boxes = (prev[day] ?? []).filter((_, i) => i !== index);
+      return { ...prev, [day]: boxes };
     });
   };
 
@@ -146,6 +239,8 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
 
   // Step 1: validate everything, then ask "Continue?" before calling the AI.
   const requestGenerate = () => {
+    // Computed now (not when the screen opened) so it stays right if the app was left open overnight.
+    const today = toDateKey(new Date());
     const end = parseDateInput(semesterEndDate);
     const minutes = Number(duration);
     const minPerDay = Number(minSlotsPerDay);
@@ -172,13 +267,15 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
     const classSchedule = activeDays.flatMap((item) =>
       item.ranges.map((range) => ({ dayOfWeek: item.day, startTime: range.startTime, endTime: range.endTime })),
     );
-    if (!classSchedule.length) {
-      Alert.alert('Add your classes', 'Enter the times you teach on at least one day, for example 7-9am.');
-      return;
-    }
-
     if (!end || end < today) {
       Alert.alert('Invalid semester date', 'Use YYYY-MM-DD and choose a date on or after today.');
+      return;
+    }
+    // Schedules are created day by day for at most a year; longer would be cut off partway.
+    const latest = new Date();
+    latest.setDate(latest.getDate() + 365);
+    if (end > toDateKey(latest)) {
+      Alert.alert('Semester too long', 'Choose a semester end date within one year from today.');
       return;
     }
     if (!Number.isInteger(minutes) || minutes < 15 || minutes > 180) {
@@ -234,8 +331,11 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
     try {
       setLoading(true);
       setResult(null);
+      setGeneratedEndDate(null);
       const generated = await generateSlotIQSchedule(options);
       setResult(generated);
+      setGeneratedEndDate(options.semesterEndDate);
+      setTab('results');
     } catch (error) {
       Alert.alert('SlotIQ error', error instanceof Error ? error.message : 'Could not generate a schedule.');
     } finally {
@@ -244,10 +344,10 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   };
 
   const approve = async () => {
-    if (!result?.suggestions.length || !onApprove) return;
+    if (!result?.suggestions.length || !onApprove || !generatedEndDate) return;
     try {
       setSaving(true);
-      await onApprove(result.suggestions, semesterEndDate);
+      await onApprove(result.suggestions, generatedEndDate);
     } catch (error) {
       Alert.alert('Could not save schedule', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -255,12 +355,24 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
     }
   };
 
+  // Simple, static checklist shown above the Generate button. requestGenerate() below still does the real validation.
+  const activeDayItems = parsedDays.filter((item) => item.available);
+  const issues: string[] = [];
+  if (parsedWindow.error) issues.push('Set your consultation hours.');
+  if (!activeDayItems.length) issues.push('Turn on at least one consultation day.');
+  const daysWithErrors = activeDayItems.filter((item) => item.error).map((item) => DAY_NAMES[item.day]);
+  if (daysWithErrors.length) issues.push(`Fix the class times on ${daysWithErrors.join(', ')}.`);
+  if (!parseDateInput(semesterEndDate)) issues.push('Enter a valid semester end date.');
+  if (!location.trim()) issues.push(mode === 'Online' ? 'Enter the meeting platform or link.' : 'Enter the consultation location.');
+  const classCount = activeDayItems.reduce((total, item) => total + item.ranges.length, 0);
+  const endDateLabel = parseDateInput(semesterEndDate) ? formatDateLabel(semesterEndDate.trim()) : null;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.headerButton}>
+        <Pressable onPress={onBack} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Go back">
           <Ionicons name="arrow-back" size={22} color={colors.textDark} />
-        </TouchableOpacity>
+        </Pressable>
         <View style={styles.headerTitleWrap}>
           <View style={styles.titleRow}>
             <Ionicons name="sparkles" size={18} color={colors.primary} />
@@ -271,187 +383,311 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
         <View style={styles.headerButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={styles.heroCard}>
-          <View style={styles.heroIcon}>
-            <Ionicons name="sparkles-outline" size={25} color={colors.primary} />
-          </View>
-          <Text style={styles.heroTitle}>Generate your consultation schedule</Text>
-          <Text style={styles.heroText}>
-            Tell SlotIQ when you teach each day. It keeps those class times blocked, checks your existing appointments, then asks Gemini to suggest recurring consultation times in the gaps.
-          </Text>
-        </View>
+      {/* ---------- Tabs: one step per screen ---------- */}
+      <View style={styles.tabBar} accessibilityRole="tablist">
+        {([
+          { key: 'classes', label: 'Classes', step: '1' },
+          { key: 'prefs', label: 'Preferences', step: '2' },
+          { key: 'results', label: 'Results', step: '3' },
+        ] as const).map((item) => {
+          const active = tab === item.key;
+          const disabled = item.key === 'results' && !result;
+          return (
+            <Pressable
+              key={item.key}
+              onPress={() => setTab(item.key)}
+              disabled={disabled}
+              style={[styles.tabButton, active && styles.tabButtonActive, disabled && styles.tabButtonDisabled]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active, disabled }}
+              accessibilityLabel={`Step ${item.step}: ${item.label}`}
+            >
+              <View style={[styles.tabStep, active && styles.tabStepActive]}>
+                <Text style={[styles.tabStepText, active && styles.tabStepTextActive]}>{item.step}</Text>
+              </View>
+              <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
-        <Text style={styles.sectionTitle}>Your class schedule</Text>
-        <View style={styles.summaryCard}>
-          <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.primary} />
-          <Text style={styles.summaryText}>
-            What are your classes this semester? For each day, choose the start and end of each class from the hour, minute and AM/PM dropdowns (on a computer, use the Up and Down arrow keys to move through the choices). Tap + to add another class time on the same day. Leave the dropdowns empty if you have no classes. SlotIQ will never suggest a consultation during these times. Turn a day off if you don't hold consultations on it.
-          </Text>
-        </View>
+      <ScrollView key={tab} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {tab === 'classes' && (
+          <>
+        {/* ---------- Step 1: classes ---------- */}
+        <Text style={styles.tabHelper}>
+          Add the classes you teach on each day. SlotIQ never suggests a consultation during a class. Turn a day off if you don't hold consultations on it.
+        </Text>
 
-        <View style={styles.card}>
-          {parsedDays.map((item, index) => (
-            <View key={item.day} style={index === 0 ? undefined : styles.dayDivider}>
-              <View style={styles.dayHeader}>
+        {parsedDays.map((item) => (
+          <View key={item.day} style={[styles.card, styles.dayCard, !item.available && styles.dayCardOff]}>
+            <View style={styles.dayHeader}>
+              <View style={styles.dayHeaderText}>
                 <Text style={styles.dayName}>{DAY_NAMES[item.day]}</Text>
-                <View style={styles.dayToggle}>
-                  <Text style={styles.dayToggleText}>{item.available ? 'Consultations on' : 'Day off'}</Text>
-                  <Switch
-                    value={item.available}
-                    onValueChange={(value) => toggleDay(item.day, value)}
-                    trackColor={{ true: colors.primary }}
-                  />
+                <View style={styles.badgeRow}>
+                  {!item.available ? (
+                    <Badge label="Day off" />
+                  ) : (
+                    <Badge
+                      label={item.ranges.length === 0 ? 'No classes' : `${item.ranges.length} ${item.ranges.length === 1 ? 'class' : 'classes'}`}
+                      icon="school-outline"
+                    />
+                  )}
                 </View>
               </View>
-              {item.available && (
-                <>
-                  {item.boxes.map((box, boxIndex) => (
-                    <View key={boxIndex}>
-                      <View style={styles.boxRow}>
-                        <ClassTimePicker
-                          value={(dayInputs[item.day] ?? [emptyTimeBox()])[boxIndex] ?? emptyTimeBox()}
-                          onChange={(value) => setBox(item.day, boxIndex, value)}
-                          hasError={!!box.error}
-                        />
-                        {item.boxes.length > 1 && (
-                          <TouchableOpacity
-                            onPress={() => removeBox(item.day, boxIndex)}
-                            style={styles.removeButton}
-                            accessibilityLabel="Remove this class time"
-                          >
-                            <Ionicons name="close-circle" size={22} color={colors.textMuted} />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                      {box.error ? <Text style={styles.errorText}>{box.error}</Text> : null}
-                    </View>
-                  ))}
-                  {item.boxes.length < MAX_BOXES_PER_DAY && (
-                    <TouchableOpacity style={styles.addBoxButton} onPress={() => addBox(item.day)}>
-                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                      <Text style={styles.addBoxText}>Add another class time</Text>
-                    </TouchableOpacity>
-                  )}
-                  {item.error ? (
-                    item.boxes.some((box) => box.error) ? null : <Text style={styles.errorText}>{item.error}</Text>
-                  ) : (
-                    <>
-                      <Text style={styles.classText}>
-                        {item.ranges.length > 0
-                          ? `Classes: ${item.ranges.map((range) => `${formatTime(range.startTime)} - ${formatTime(range.endTime)}`).join('  ·  ')}`
-                          : 'No classes entered, so you are free all day.'}
-                      </Text>
-                      {parsedWindow.range &&
-                        (item.free.length > 0 ? (
-                          <Text style={styles.previewText}>
-                            Free for consultations: {item.free.map((range) => `${formatTime(range.startTime)} - ${formatTime(range.endTime)}`).join('  ·  ')}
-                          </Text>
-                        ) : (
-                          <Text style={styles.classText}>No free time left inside your consultation hours.</Text>
-                        ))}
-                    </>
-                  )}
-                </>
-              )}
+              <View style={styles.dayToggle}>
+                <Text style={styles.dayToggleText}>{item.available ? 'Open' : 'Closed'}</Text>
+                <Switch
+                  value={item.available}
+                  onValueChange={(value) => toggleDay(item.day, value)}
+                  trackColor={{ true: colors.primary }}
+                  accessibilityLabel={`Hold consultations on ${DAY_NAMES[item.day]}`}
+                />
+              </View>
             </View>
-          ))}
+
+            {item.available && (
+              <>
+                {item.boxes.map((box, boxIndex) => (
+                  <View key={boxIndex} style={styles.classBox}>
+                    <View style={styles.classBoxHeader}>
+                      <Text style={styles.classBoxTitle}>Class {boxIndex + 1}</Text>
+                      <Pressable
+                        onPress={() => removeBox(item.day, boxIndex)}
+                        style={styles.removeButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove class ${boxIndex + 1}`}
+                      >
+                        <Ionicons name="trash-outline" size={15} color={colors.danger} />
+                        <Text style={styles.removeText}>Remove</Text>
+                      </Pressable>
+                    </View>
+                    <ClassTimePicker
+                      value={(dayInputs[item.day] ?? [])[boxIndex] ?? emptyTimeBox()}
+                      onChange={(value) => setBox(item.day, boxIndex, value)}
+                      hasError={!!box.error}
+                    />
+                    {box.error ? <Text style={styles.errorText}>{box.error}</Text> : null}
+                  </View>
+                ))}
+
+                {item.boxes.length < MAX_BOXES_PER_DAY && (
+                  <Button
+                    label={item.boxes.length === 0 ? 'Add a class' : 'Add another class'}
+                    icon="add"
+                    variant="secondary"
+                    onPress={() => addBox(item.day)}
+                  />
+                )}
+
+                {item.error && !item.boxes.some((box) => box.error) ? <Text style={styles.errorText}>{item.error}</Text> : null}
+
+                {!item.error && parsedWindow.range && (
+                  <View style={styles.freeRow}>
+                    <Text style={styles.freeLabel}>Free for consultations</Text>
+                    {item.free.length > 0 ? (
+                      <View style={styles.badgeRow}>
+                        {item.free.map((range) => (
+                          <Badge key={`${range.startTime}-${range.endTime}`} label={timeRangeText(range)} tone="success" icon="time-outline" />
+                        ))}
+                      </View>
+                    ) : (
+                      <Badge label="No free time inside your hours" tone="warning" icon="alert-circle-outline" />
+                    )}
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        ))}
+
+          </>
+        )}
+
+        {tab === 'prefs' && (
+          <>
+        {/* ---------- Step 2: preferences ---------- */}
+        <Text style={styles.tabHelper}>Tell SlotIQ when, how long and where you hold consultations.</Text>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>When</Text>
+          <Field label="Consultation hours" helper="SlotIQ only suggests times between these hours.">
+            <ClassTimePicker value={windowBox} onChange={setWindowBox} hasError={!!parsedWindow.error} />
+            {parsedWindow.error ? <Text style={styles.errorText}>{parsedWindow.error}</Text> : null}
+          </Field>
+
+          <Field
+            label="Semester end date"
+            helper={endDateLabel ? `Schedule runs until ${endDateLabel}.` : 'Use the format YYYY-MM-DD, for example 2027-02-28.'}
+          >
+            <TextInput
+              value={semesterEndDate}
+              onChangeText={setSemesterEndDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.textMuted}
+              style={[styles.input, !endDateLabel && styles.inputError]}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Semester end date"
+            />
+            <View style={styles.chipRow}>
+              {SEMESTER_CHOICES.map((months) => {
+                const value = toDateKey(addMonths(new Date(), months));
+                const active = semesterEndDate.trim() === value;
+                return (
+                  <Pressable
+                    key={months}
+                    onPress={() => setSemesterEndDate(value)}
+                    style={[styles.chip, active && styles.chipActive]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`End in ${months} months`}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{months} months</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Field>
         </View>
 
-        <Text style={[styles.sectionTitle, styles.settingsTitle]}>Schedule settings</Text>
         <View style={styles.card}>
-          <Text style={[styles.label, styles.firstLabel]}>Consultation hours (earliest - latest)</Text>
-          <TextInput
-            value={windowInput}
-            onChangeText={setWindowInput}
-            placeholder="e.g. 8am-5pm"
-            placeholderTextColor={colors.textMuted}
-            style={[styles.input, !!parsedWindow.error && styles.inputError]}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {parsedWindow.error ? (
-            <Text style={styles.errorText}>{parsedWindow.error}</Text>
-          ) : (
-            <Text style={styles.hint}>SlotIQ only suggests times inside these hours, around your classes.</Text>
-          )}
-
-          <Text style={styles.label}>Semester end date</Text>
-          <TextInput
-            value={semesterEndDate}
-            onChangeText={setSemesterEndDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            autoCapitalize="none"
-          />
-          <Text style={styles.hint}>Example: 2027-02-28</Text>
-
-          <Text style={styles.label}>Consultation duration (minutes)</Text>
-          <TextInput
-            value={duration}
-            onChangeText={setDuration}
-            keyboardType="number-pad"
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Suggested slots per day</Text>
-          <View style={styles.limitRow}>
-            <View style={styles.limitCol}>
-              <Text style={styles.limitLabel}>Minimum</Text>
-              <TextInput
-                value={minSlotsPerDay}
-                onChangeText={setMinSlotsPerDay}
-                keyboardType="number-pad"
-                style={styles.input}
-              />
+          <Text style={styles.cardTitle}>How long</Text>
+          <Field label="Consultation length" helper="Between 15 and 180 minutes.">
+            <TextInput
+              value={duration}
+              onChangeText={setDuration}
+              placeholder="e.g. 30"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="number-pad"
+              style={styles.input}
+              accessibilityLabel="Consultation length in minutes"
+            />
+            <View style={styles.chipRow}>
+              {DURATION_CHOICES.map((value) => {
+                const active = duration === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => setDuration(value)}
+                    style={[styles.chip, active && styles.chipActive]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${value} minutes`}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{value} min</Text>
+                  </Pressable>
+                );
+              })}
             </View>
-            <View style={styles.limitCol}>
-              <Text style={styles.limitLabel}>Maximum</Text>
-              <TextInput
-                value={maxSlotsPerDay}
-                onChangeText={setMaxSlotsPerDay}
-                keyboardType="number-pad"
-                style={styles.input}
-              />
-            </View>
-          </View>
-          <Text style={styles.hint}>SlotIQ aims for this many suggestions on each day, as far as your free time allows.</Text>
+          </Field>
 
-          <Text style={styles.label}>Consultation mode</Text>
-          <View style={styles.choiceRow}>
-            {(['Face-to-Face', 'Online'] as const).map((item) => (
-              <TouchableOpacity
-                key={item}
-                style={[styles.choice, mode === item && styles.choiceActive]}
-                onPress={() => setMode(item)}
-              >
-                <Text style={[styles.choiceText, mode === item && styles.choiceTextActive]}>{item}</Text>
-              </TouchableOpacity>
+          <Field label="Suggestions per day" helper="SlotIQ aims for this range, as far as your free time allows.">
+            <View style={styles.limitRow}>
+              <View style={styles.limitCol}>
+                <Text style={styles.limitLabel}>At least</Text>
+                <TextInput
+                  value={minSlotsPerDay}
+                  onChangeText={setMinSlotsPerDay}
+                  placeholder="e.g. 2"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="number-pad"
+                  style={styles.input}
+                  accessibilityLabel="Minimum suggestions per day"
+                />
+              </View>
+              <View style={styles.limitCol}>
+                <Text style={styles.limitLabel}>At most</Text>
+                <TextInput
+                  value={maxSlotsPerDay}
+                  onChangeText={setMaxSlotsPerDay}
+                  placeholder="e.g. 4"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="number-pad"
+                  style={styles.input}
+                  accessibilityLabel="Maximum suggestions per day"
+                />
+              </View>
+            </View>
+          </Field>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Where</Text>
+          <Field label="Consultation mode">
+            <View style={styles.choiceRow}>
+              {(['Face-to-Face', 'Online'] as const).map((item) => {
+                const active = mode === item;
+                return (
+                  <Pressable
+                    key={item}
+                    style={[styles.choice, active && styles.choiceActive]}
+                    onPress={() => setMode(item)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Ionicons
+                      name={item === 'Online' ? 'videocam-outline' : 'people-outline'}
+                      size={18}
+                      color={active ? colors.primary : colors.textMuted}
+                    />
+                    <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{item}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Field>
+
+          <Field label={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}>
+            <TextInput
+              value={location}
+              onChangeText={setLocation}
+              placeholder={mode === 'Online' ? 'e.g. Google Meet' : 'e.g. Faculty Office 204'}
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              autoCapitalize="none"
+              accessibilityLabel={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}
+            />
+          </Field>
+        </View>
+
+        {/* ---------- Generate ---------- */}
+        {issues.length > 0 ? (
+          <View style={[styles.statusCard, styles.statusWarning]}>
+            <View style={styles.statusHeader}>
+              <Ionicons name="alert-circle-outline" size={18} color={colors.danger} />
+              <Text style={[styles.statusTitle, { color: colors.danger }]}>Before you generate</Text>
+            </View>
+            {issues.map((issue) => (
+              <Text key={issue} style={styles.statusItem}>
+                • {issue}
+              </Text>
             ))}
           </View>
+        ) : (
+          <View style={[styles.statusCard, styles.statusReady]}>
+            <View style={styles.statusHeader}>
+              <Ionicons name="checkmark-circle-outline" size={18} color={colors.success} />
+              <Text style={[styles.statusTitle, { color: colors.success }]}>Ready to generate</Text>
+            </View>
+            <Text style={styles.statusItem}>
+              {activeDayItems.length} consultation {activeDayItems.length === 1 ? 'day' : 'days'} · {classCount} {classCount === 1 ? 'class' : 'classes'} blocked
+              {endDateLabel ? ` · until ${endDateLabel}` : ''}
+            </Text>
+          </View>
+        )}
 
-          <Text style={styles.label}>{mode === 'Online' ? 'Meeting platform/link' : 'Consultation location'}</Text>
-          <TextInput
-            value={location}
-            onChangeText={setLocation}
-            placeholder={mode === 'Online' ? 'e.g. Google Meet' : 'e.g. Faculty Office 204'}
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            autoCapitalize="none"
-          />
-        </View>
+          </>
+        )}
 
-        <TouchableOpacity style={styles.generateButton} onPress={requestGenerate} disabled={loading}>
-          {loading ? <ActivityIndicator color={colors.white} /> : <Ionicons name="sparkles" size={17} color={colors.white} />}
-          <Text style={styles.generateButtonText}>{loading ? 'Generating...' : 'Generate with SlotIQ'}</Text>
-        </TouchableOpacity>
-
+        {tab === 'results' && result && (
+          <>
+        {/* ---------- Step 3: results ---------- */}
         {result && (
           <View style={styles.resultsSection}>
-            <Text style={styles.sectionTitle}>Suggested schedule</Text>
+
             <View style={styles.summaryCard}>
-              <Ionicons name="bulb-outline" size={19} color={colors.primary} />
+              <Ionicons name="bulb-outline" size={18} color={colors.primary} />
               <Text style={styles.summaryText}>{result.summary}</Text>
             </View>
 
@@ -459,56 +695,86 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
               <View style={styles.emptyCard}>
                 <Ionicons name="calendar-clear-outline" size={30} color={colors.textMuted} />
                 <Text style={styles.emptyTitle}>No compatible schedule found</Text>
-                <Text style={styles.emptyText}>Try a shorter consultation duration, wider consultation hours, or more consultation days.</Text>
+                <Text style={styles.emptyText}>Try a shorter consultation length, wider consultation hours, or more consultation days.</Text>
               </View>
             ) : (
               result.suggestions.map((suggestion, index) => (
-                <View key={`${suggestion.startTime}-${suggestion.endTime}-${index}`} style={styles.suggestionCard}>
+                <View key={`${suggestion.startTime}-${suggestion.endTime}-${index}`} style={[styles.card, styles.suggestionCard]}>
                   <View style={styles.suggestionTopRow}>
-                    <View style={styles.numberCircle}><Text style={styles.numberText}>{index + 1}</Text></View>
-                    <View style={styles.suggestionMain}>
-                      <Text style={styles.suggestionDays}>{dayLabel(suggestion.daysOfWeek)}</Text>
-                      <Text style={styles.suggestionTime}>{formatTime(suggestion.startTime)} - {formatTime(suggestion.endTime)}</Text>
+                    <View style={styles.numberCircle}>
+                      <Text style={styles.numberText}>{index + 1}</Text>
                     </View>
+                    <Text style={styles.suggestionTime}>{timeRangeText(suggestion)}</Text>
                   </View>
-                  <View style={styles.metaRow}>
-                    <Ionicons name={suggestion.mode === 'Online' ? 'wifi-outline' : 'location-outline'} size={14} color={colors.textMuted} />
-                    <Text style={styles.metaText}>{suggestion.mode} · {suggestion.location}</Text>
+                  <View style={styles.badgeRow}>
+                    {suggestion.daysOfWeek.map((day) => (
+                      <Badge key={day} label={shortDay(day)} icon="calendar-outline" />
+                    ))}
+                    <Badge
+                      label={`${suggestion.mode} · ${suggestion.location}`}
+                      icon={suggestion.mode === 'Online' ? 'videocam-outline' : 'location-outline'}
+                    />
                   </View>
                   <Text style={styles.reason}>{suggestion.reason}</Text>
                 </View>
               ))
             )}
 
-            {!!result.suggestions.length && (
-              <TouchableOpacity style={styles.approveButton} onPress={approve} disabled={saving}>
-                {saving ? <ActivityIndicator color={colors.white} /> : <Ionicons name="checkmark-circle-outline" size={18} color={colors.white} />}
-                <Text style={styles.approveButtonText}>{saving ? 'Saving...' : 'Approve & Save Schedule'}</Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={styles.disclaimer}>
-              SlotIQ suggestions are reviewed by you before they become part of your AppointPro availability.
-            </Text>
           </View>
+        )}
+          </>
         )}
       </ScrollView>
 
-      <Modal
-        visible={!!pendingOptions}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPendingOptions(null)}
-      >
+      {/* ---------- Fixed footer: the one action for this step ---------- */}
+      <View style={styles.footer}>
+        {tab === 'classes' && (
+          <Button label="Next: Preferences" icon="arrow-forward" onPress={() => setTab('prefs')} />
+        )}
+        {tab === 'prefs' && (
+          <View style={styles.footerRow}>
+            <View style={styles.footerSide}>
+              <Button label="Back" variant="secondary" onPress={() => setTab('classes')} />
+            </View>
+            <View style={styles.footerMain}>
+              <Button
+                label={loading ? 'Generating… please wait' : 'Generate with SlotIQ'}
+                icon={loading ? undefined : 'sparkles'}
+                onPress={requestGenerate}
+                disabled={loading}
+              />
+            </View>
+          </View>
+        )}
+        {tab === 'results' && (
+          <View style={styles.footerRow}>
+            <View style={styles.footerSide}>
+              <Button label="Redo" variant="secondary" onPress={() => setTab('prefs')} disabled={loading || saving} />
+            </View>
+            <View style={styles.footerMain}>
+              {result && result.suggestions.length > 0 ? (
+                <Button
+                  label={saving ? 'Saving…' : 'Approve and save schedule'}
+                  icon={saving ? undefined : 'checkmark-circle-outline'}
+                  onPress={approve}
+                  disabled={saving}
+                />
+              ) : (
+                <Button label="Change preferences" onPress={() => setTab('prefs')} />
+              )}
+            </View>
+          </View>
+        )}
+      </View>
+
+      <Modal visible={!!pendingOptions} transparent animationType="none" onRequestClose={() => setPendingOptions(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalIcon}>
               <Ionicons name="sparkles" size={22} color={colors.primary} />
             </View>
-            <Text style={styles.modalTitle}>Continue generating the schedule?</Text>
-            <Text style={styles.modalText}>
-              SlotIQ will build consultation times around the classes below. You can review it before anything is saved.
-            </Text>
+            <Text style={styles.modalTitle}>Generate this schedule?</Text>
+            <Text style={styles.modalText}>SlotIQ will plan around these classes. You can review the result before anything is saved.</Text>
 
             <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
               {parsedDays
@@ -517,27 +783,33 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                   <View key={item.day} style={styles.modalRow}>
                     <Text style={styles.modalDay}>{DAY_NAMES[item.day]}</Text>
                     <Text style={styles.modalTimes}>
-                      {item.ranges.length > 0
-                        ? item.ranges.map((range) => `${formatTime(range.startTime)} - ${formatTime(range.endTime)}`).join('\n')
-                        : 'No classes'}
+                      {item.ranges.length > 0 ? item.ranges.map(timeRangeText).join('\n') : 'No classes'}
                     </Text>
                   </View>
                 ))}
             </ScrollView>
 
             {pendingOptions && (
-              <Text style={styles.modalMeta}>
-                {pendingOptions.consultationDurationMinutes}-min slots · {pendingOptions.minSlotsPerDay}-{pendingOptions.maxSlotsPerDay} suggestions per day · {pendingOptions.preferredMode} ({pendingOptions.preferredLocation}){'\n'}Consultation hours: {formatTime(pendingOptions.windowStart)} - {formatTime(pendingOptions.windowEnd)}
-              </Text>
+              <View style={styles.modalMetaBox}>
+                <Text style={styles.modalMeta}>
+                  {pendingOptions.consultationDurationMinutes}-minute slots · {pendingOptions.minSlotsPerDay}-{pendingOptions.maxSlotsPerDay} per day
+                </Text>
+                <Text style={styles.modalMeta}>
+                  {pendingOptions.preferredMode} · {pendingOptions.preferredLocation}
+                </Text>
+                <Text style={styles.modalMeta}>
+                  Hours: {formatTime(pendingOptions.windowStart)} - {formatTime(pendingOptions.windowEnd)}
+                </Text>
+              </View>
             )}
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.modalCancel]} onPress={() => setPendingOptions(null)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.modalContinue]} onPress={confirmGenerate}>
-                <Text style={styles.modalContinueText}>Continue</Text>
-              </TouchableOpacity>
+              <View style={styles.modalButtonCol}>
+                <Button label="Cancel" variant="secondary" onPress={() => setPendingOptions(null)} />
+              </View>
+              <View style={styles.modalButtonCol}>
+                <Button label="Generate" onPress={confirmGenerate} />
+              </View>
             </View>
           </View>
         </View>
@@ -548,82 +820,153 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   );
 }
 
+// One set of sizes used everywhere: 16 padding, 14 card radius, 10 control radius.
+const CARD_RADIUS = 14;
+const CONTROL_RADIUS = 10;
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.white },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerButton: { width: 30, alignItems: 'flex-start' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  headerButton: { width: 36, height: 36, alignItems: 'flex-start', justifyContent: 'center' },
   headerTitleWrap: { flex: 1, alignItems: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerTitle: { fontSize: 19, fontWeight: '800', color: colors.textDark },
-  headerSubtitle: { marginTop: 2, fontSize: 11, color: colors.textMuted },
-  content: { padding: spacing.lg, paddingBottom: 100 },
-  heroCard: { padding: spacing.lg, borderRadius: 18, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.lg },
-  heroIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white, marginBottom: 12 },
-  heroTitle: { fontSize: 20, fontWeight: '800', color: colors.textDark },
-  heroText: { marginTop: 8, fontSize: 13, lineHeight: 20, color: colors.textMuted },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: colors.textDark, marginBottom: 10 },
-  settingsTitle: { marginTop: spacing.lg },
-  card: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: spacing.lg, backgroundColor: colors.white },
-  label: { fontSize: 12, fontWeight: '700', color: colors.textDark, marginTop: 13, marginBottom: 7 },
-  firstLabel: { marginTop: 0 },
-  dayDivider: { marginTop: 2 },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: colors.textDark },
+  headerSubtitle: { marginTop: 2, fontSize: 12, color: colors.textMuted },
+  content: { padding: spacing.md, paddingBottom: spacing.lg, gap: 12 },
+  tabHelper: { fontSize: 13, lineHeight: 18, color: colors.textMuted },
+
+  // Step tabs
+  tabBar: { flexDirection: 'row', gap: 6, padding: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.white },
+  tabButton: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: CONTROL_RADIUS, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  tabButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabButtonDisabled: { backgroundColor: colors.background, opacity: 0.6 },
+  tabStep: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.border },
+  tabStepActive: { backgroundColor: colors.white },
+  tabStepText: { fontSize: 12, fontWeight: '800', color: colors.textDark },
+  tabStepTextActive: { color: colors.primary },
+  tabText: { fontSize: 13, fontWeight: '800', color: colors.textMuted },
+  tabTextActive: { color: colors.white },
+
+  // Fixed footer
+  footer: { padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.white },
+  footerRow: { flexDirection: 'row', gap: 10 },
+  footerSide: { flex: 1 },
+  footerMain: { flex: 2.2 },
+
+  // Cards
+  card: { borderWidth: 1, borderColor: colors.border, borderRadius: CARD_RADIUS, padding: spacing.md, backgroundColor: colors.white },
+  cardTitle: { fontSize: 13, fontWeight: '800', color: colors.primary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+
+  // Overview
+  overviewTitle: { fontSize: 18, fontWeight: '800', color: colors.textDark },
+  overviewText: { marginTop: 4, fontSize: 13, lineHeight: 19, color: colors.textMuted },
+  overviewSteps: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  overviewStep: { flex: 1, alignItems: 'center', gap: 6, padding: 10, borderRadius: CONTROL_RADIUS, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  overviewIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoBg },
+  overviewStepText: { fontSize: 12, fontWeight: '700', color: colors.textDark, textAlign: 'center' },
+
+  // Section headers
+  sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 8 },
+  stepBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+  stepBadgeText: { fontSize: 13, fontWeight: '800', color: colors.white },
+  sectionHeaderText: { flex: 1 },
+  sectionTitle: { fontSize: 17, fontWeight: '800', color: colors.textDark },
+  sectionHelper: { marginTop: 2, fontSize: 13, lineHeight: 18, color: colors.textMuted },
+
+  // Day cards
+  dayCard: { gap: 10 },
+  dayCardOff: { backgroundColor: colors.background },
+  dayHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dayHeaderText: { flex: 1, gap: 6 },
+  dayName: { fontSize: 16, fontWeight: '800', color: colors.textDark },
+  dayToggle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dayToggleText: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
+  classBox: { padding: 12, borderRadius: CONTROL_RADIUS, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, gap: 8 },
+  classBoxHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  classBoxTitle: { fontSize: 13, fontWeight: '700', color: colors.textDark },
+  removeButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 },
+  removeText: { fontSize: 12, fontWeight: '700', color: colors.danger },
+  freeRow: { gap: 6 },
+  freeLabel: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
+
+  // Badges
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
+  badgeNeutral: { backgroundColor: colors.background, borderColor: colors.border },
+  badgeSuccess: { backgroundColor: '#E6F4EA', borderColor: '#B7DFC1' },
+  badgeWarning: { backgroundColor: '#FDECEA', borderColor: '#F5B7B1' },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  badgeTextNeutral: { color: colors.textDark },
+  badgeTextSuccess: { color: '#14632B' },
+  badgeTextWarning: { color: '#A3261B' },
+
+  // Fields
+  field: { marginTop: 12 },
+  label: { fontSize: 14, fontWeight: '700', color: colors.textDark, marginBottom: 6 },
+  helper: { fontSize: 12, lineHeight: 17, color: colors.textMuted, marginTop: 6 },
+  input: { height: 46, borderWidth: 1, borderColor: colors.border, borderRadius: CONTROL_RADIUS, paddingHorizontal: 12, fontSize: 14, color: colors.textDark, backgroundColor: colors.white },
+  inputError: { borderColor: colors.danger },
+  errorText: { fontSize: 12, lineHeight: 17, color: colors.danger, marginTop: 4 },
   limitRow: { flexDirection: 'row', gap: 12 },
   limitCol: { flex: 1 },
-  limitLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 4 },
-  input: { height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, color: colors.textDark, backgroundColor: colors.white },
-  inputError: { borderColor: colors.danger },
-  errorText: { marginTop: 5, fontSize: 11, color: colors.danger },
-  previewText: { marginTop: 3, fontSize: 11, color: colors.success, fontWeight: '600' },
-  boxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  removeButton: { width: 28, height: 44, alignItems: 'center', justifyContent: 'center' },
-  addBoxButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, alignSelf: 'flex-start', paddingVertical: 4 },
-  addBoxText: { fontSize: 12, fontWeight: '700', color: colors.primary },
-  classText: { marginTop: 5, fontSize: 11, color: colors.textMuted },
-  dayHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 6 },
-  dayName: { fontSize: 12, fontWeight: '700', color: colors.textDark },
-  dayToggle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dayToggleText: { fontSize: 11, color: colors.textMuted },
-  hint: { fontSize: 10, color: colors.textMuted, marginTop: 5 },
+  limitLabel: { fontSize: 12, fontWeight: '600', color: colors.textMuted, marginBottom: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
+  chipActive: { borderColor: colors.primary, backgroundColor: colors.infoBg },
+  chipText: { fontSize: 13, fontWeight: '700', color: colors.textMuted },
+  chipTextActive: { color: colors.primary },
   choiceRow: { flexDirection: 'row', gap: 8 },
-  choice: { flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  choice: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: CONTROL_RADIUS, paddingVertical: 12, backgroundColor: colors.white },
   choiceActive: { borderColor: colors.primary, backgroundColor: colors.infoBg },
-  choiceText: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
+  choiceText: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
   choiceTextActive: { color: colors.primary },
-  generateButton: { marginTop: 20, height: 46, borderRadius: 12, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  generateButtonText: { color: colors.white, fontSize: 13, fontWeight: '800' },
-  resultsSection: { marginTop: spacing.xl },
-  summaryCard: { flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, marginBottom: 10, backgroundColor: colors.background },
-  summaryText: { flex: 1, color: colors.textDark, fontSize: 12, lineHeight: 18 },
-  suggestionCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 14, marginBottom: 10 },
-  suggestionTopRow: { flexDirection: 'row', alignItems: 'center' },
-  numberCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.infoBg, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  numberText: { color: colors.primary, fontWeight: '800', fontSize: 12 },
-  suggestionMain: { flex: 1 },
-  suggestionDays: { fontSize: 13, fontWeight: '800', color: colors.textDark },
-  suggestionTime: { marginTop: 3, fontSize: 12, color: colors.textMuted },
-  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 5 },
-  metaText: { fontSize: 11, color: colors.textMuted, flex: 1 },
-  reason: { marginTop: 9, fontSize: 11, lineHeight: 17, color: colors.textDark },
-  approveButton: { height: 46, borderRadius: 12, backgroundColor: colors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 6 },
-  approveButtonText: { color: colors.white, fontSize: 13, fontWeight: '800' },
-  emptyCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 24, alignItems: 'center' },
-  emptyTitle: { marginTop: 8, fontWeight: '800', color: colors.textDark },
-  emptyText: { marginTop: 4, textAlign: 'center', color: colors.textMuted, fontSize: 12 },
-  disclaimer: { textAlign: 'center', color: colors.textMuted, fontSize: 10, lineHeight: 15, marginTop: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
-  modalCard: { width: '100%', maxWidth: 420, backgroundColor: colors.white, borderRadius: 18, padding: spacing.lg },
-  modalIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoBg, alignSelf: 'center', marginBottom: 12 },
-  modalTitle: { fontSize: 17, fontWeight: '800', color: colors.textDark, textAlign: 'center' },
-  modalText: { marginTop: 8, fontSize: 12, lineHeight: 18, color: colors.textMuted, textAlign: 'center' },
-  modalList: { maxHeight: 220, marginTop: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12 },
-  modalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.border },
-  modalDay: { fontSize: 12, fontWeight: '800', color: colors.textDark },
-  modalTimes: { fontSize: 12, color: colors.textMuted, textAlign: 'right' },
-  modalMeta: { marginTop: 12, fontSize: 11, lineHeight: 16, color: colors.textMuted, textAlign: 'center' },
-  modalButtons: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  modalButton: { flex: 1, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  modalCancel: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white },
-  modalCancelText: { fontSize: 13, fontWeight: '800', color: colors.textDark },
-  modalContinue: { backgroundColor: colors.primary },
-  modalContinueText: { fontSize: 13, fontWeight: '800', color: colors.white },
+
+  // Buttons: primary = filled, secondary = outlined
+  button: { height: 48, borderRadius: CONTROL_RADIUS, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
+  buttonPrimary: { backgroundColor: colors.primary },
+  buttonPrimaryPressed: { backgroundColor: colors.primaryDark },
+  buttonSecondary: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.primary },
+  buttonSecondaryPressed: { backgroundColor: colors.infoBg },
+  buttonDisabled: { opacity: 0.55 },
+  buttonText: { fontSize: 15, fontWeight: '800' },
+  buttonTextPrimary: { color: colors.white },
+  buttonTextSecondary: { color: colors.primary },
+
+  // Status card above Generate
+  statusCard: { borderWidth: 1, borderRadius: CARD_RADIUS, padding: spacing.md, gap: 4 },
+  statusWarning: { backgroundColor: '#FDECEA', borderColor: '#F5B7B1' },
+  statusReady: { backgroundColor: '#E6F4EA', borderColor: '#B7DFC1' },
+  statusHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusTitle: { fontSize: 14, fontWeight: '800' },
+  statusItem: { fontSize: 13, lineHeight: 19, color: colors.textDark },
+
+  // Results
+  resultsSection: { gap: 12, marginTop: 12 },
+  summaryCard: { flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: CARD_RADIUS, padding: spacing.md, backgroundColor: colors.background },
+  summaryText: { flex: 1, color: colors.textDark, fontSize: 13, lineHeight: 19 },
+  suggestionCard: { gap: 10 },
+  suggestionTopRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  numberCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.infoBg, alignItems: 'center', justifyContent: 'center' },
+  numberText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
+  suggestionTime: { flex: 1, fontSize: 17, fontWeight: '800', color: colors.textDark },
+  reason: { fontSize: 13, lineHeight: 19, color: colors.textMuted },
+  resultActions: { gap: 10 },
+  emptyCard: { borderWidth: 1, borderColor: colors.border, borderRadius: CARD_RADIUS, padding: 24, alignItems: 'center', gap: 6 },
+  emptyTitle: { fontSize: 15, fontWeight: '800', color: colors.textDark },
+  emptyText: { textAlign: 'center', color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+
+  // Confirm dialog
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.md },
+  modalCard: { width: '100%', maxWidth: 420, backgroundColor: colors.white, borderRadius: 18, padding: spacing.md },
+  modalIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoBg, alignSelf: 'center', marginBottom: 10 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: colors.textDark, textAlign: 'center' },
+  modalText: { marginTop: 6, fontSize: 13, lineHeight: 19, color: colors.textMuted, textAlign: 'center' },
+  modalList: { maxHeight: 200, marginTop: 14, borderWidth: 1, borderColor: colors.border, borderRadius: CONTROL_RADIUS, paddingHorizontal: 12 },
+  modalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  modalDay: { fontSize: 13, fontWeight: '800', color: colors.textDark },
+  modalTimes: { fontSize: 13, color: colors.textMuted, textAlign: 'right' },
+  modalMetaBox: { marginTop: 12, padding: 12, borderRadius: CONTROL_RADIUS, backgroundColor: colors.background, gap: 2 },
+  modalMeta: { fontSize: 13, lineHeight: 19, color: colors.textDark, textAlign: 'center' },
+  modalButtons: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  modalButtonCol: { flex: 1 },
 });

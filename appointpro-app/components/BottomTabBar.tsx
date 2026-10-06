@@ -9,7 +9,8 @@ import useKeyboardVisible from './useKeyboardVisible';
 export type TabKey = 'home' | 'directory' | 'appointments' | 'notifications' | 'profile';
 
 type BottomTabBarProps = {
-  active: TabKey;
+  // null = none of the tabs is highlighted (e.g. on the Book an Appointment screen).
+  active: TabKey | null;
   onChange?: (tab: TabKey) => void;
 };
 

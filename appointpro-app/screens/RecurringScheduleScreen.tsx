@@ -76,10 +76,21 @@ export default function RecurringScheduleScreen({
       ? 'End time must be after the start time.'
       : null;
 
+  // Slots are generated day by day, so very long ranges used to be cut off silently
+  // while the rule still claimed the full length. Keep it to one year.
+  const MAX_WEEKS = 52;
+  const weeksNumber = parseInt(weeks, 10);
+  const weeksError =
+    !Number.isInteger(weeksNumber) || weeksNumber < 1
+      ? 'Enter how many weeks to repeat (1-52).'
+      : weeksNumber > MAX_WEEKS
+      ? `Choose ${MAX_WEEKS} weeks or fewer.`
+      : null;
+
   const canConfirm =
     selectedDays.length > 0 &&
     location.trim().length > 0 &&
-    parseInt(weeks, 10) > 0 &&
+    !weeksError &&
     !timeError;
 
   const toggleDay = (dayIndex: number) => {
@@ -286,6 +297,7 @@ export default function RecurringScheduleScreen({
           A typical semester runs about 16 weeks. Slots will be created automatically for
           every matching day until then.
         </Text>
+        {weeksError ? <Text style={[styles.helperText, { color: colors.danger }]}>{weeksError}</Text> : null}
       </ScrollView>
 
       <View style={styles.footer}>

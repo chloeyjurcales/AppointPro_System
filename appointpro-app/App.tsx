@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,7 +28,11 @@ import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import * as Linking from 'expo-linking';
 import SettingsScreen from './screens/SettingsScreen';
 import FacultyFab from './components/FacultyFab';
+import StudentFab from './components/StudentFab';
 import CancelReasonModal from './components/CancelReasonModal';
+import { isSameDepartmentValue } from './lib/departments';
+import { conflictMessage } from './components/SlotBookingCard';
+import { findStudentBookingConflict } from './lib/bookingConflict';
 import { EditableScheduleValues } from './components/EditScheduleModal';
 import AccountTypeScreen from './screens/AccountTypeScreen';
 import StudentSignUpScreen from './screens/StudentSignUpScreen';
@@ -37,6 +41,7 @@ import VerifyEmailScreen from './screens/VerifyEmailScreen';
 import HomeScreen from './screens/HomeScreen';
 import DirectoryScreen, { FacultyMember } from './screens/DirectoryScreen';
 import FacultyProfileScreen from './screens/FacultyProfileScreen';
+import BookInstructorScreen from './screens/BookInstructorScreen';
 import BookAppointmentScreen, { BookingSelection } from './screens/BookAppointmentScreen';
 import BookingConfirmationScreen from './screens/BookingConfirmationScreen';
 import BookingCancellationScreen from './screens/BookingCancellationScreen';
@@ -69,6 +74,17 @@ import FacultyPersonalInformationScreen, {
 import AboutScreen from './screens/AboutScreen';
 import QueueScreen from './screens/QueueScreen';
 import FacultyRescheduleAppointmentScreen from './screens/FacultyRescheduleAppointmentScreen';
+import StudentScheduleOnboardingScreen from './screens/StudentScheduleOnboardingScreen';
+import {
+  ClassBlock,
+  NewClassBlock,
+  dayOfWeekFromDateKey,
+  describeConflict,
+  fetchStudentClassSchedule,
+  findScheduleConflict,
+  normalizeTime,
+  saveStudentClassSchedule,
+} from './lib/classSchedule';
 import RescheduleProposalScreen from './screens/RescheduleProposalScreen';
 import FacultyCancelAppointmentScreen from './screens/FacultyCancelAppointmentScreen';
 import FacultyActionSuccessScreen, {
@@ -87,6 +103,7 @@ import {
   ScheduleSlot,
   BookedRange,
   WEEK_DAYS,
+  refreshWeekDays,
   INITIAL_SCHEDULE_BY_DATE,
   bookMinutes,
   releaseMinutes,
@@ -127,6 +144,7 @@ type Screen =
   | 'home'
   | 'directory'
   | 'facultyProfile'
+  | 'bookInstructors'
   | 'bookAppointment'
   | 'rescheduleAppointment'
   | 'bookingConfirmation'
@@ -154,7 +172,8 @@ type Screen =
   | 'facultyCancelAppointment'
   | 'facultyActionSuccess'
   | 'recurringSchedule'
-  | 'slotIQ';
+  | 'slotIQ'
+  | 'studentClassSchedule';
 
 type StudentProfileData = PersonalInformation & {
   studentId: string;
@@ -413,6 +432,8 @@ async function fetchFacultyWeekSchedule(
   facultyId: string,
   excludeAppointmentId?: string
 ): Promise<Record<number, ScheduleSlot[]>> {
+  // Rebuild the week first so an app left open across midnight doesn't query last week.
+  refreshWeekDays();
   const dateKeys = WEEK_DAYS.map((d) => d.dateKey);
   const dateKeyToDayNum = new Map(WEEK_DAYS.map((d) => [d.dateKey, d.date]));
 
@@ -533,11 +554,18 @@ function directoryModeLabel(appt: StudentAppointment): string {
   return appt.mode === 'online' ? 'Online' : 'Face-to-Face';
 }
 
+// Students may only book instructors from their own department.
+// Compared by department, not raw text, so "CCS" (older accounts) and
+// "College of Computer Studies (CCS)" count as the same department.
+function isSameDepartment(a?: string | null, b?: string | null): boolean {
+  return isSameDepartmentValue(a, b);
+}
+
 // Screens that render a bottom tab bar. The tab bar lives inside each screen,
 // so fading the whole screen in on navigation made the bar blink out and back
 // in. We never fade these screens, and tab-to-tab switches don't animate.
 const SCREENS_WITH_TAB_BAR = new Set<Screen>([
-  'home', 'directory', 'appointments', 'notifications', 'profile', 'facultyProfile',
+  'home', 'directory', 'appointments', 'notifications', 'profile', 'facultyProfile', 'bookInstructors',
   'queue', 'facultyHome', 'facultyDirectory', 'studentProfile', 'facultyAvailability',
   'addTimeSlot', 'slotIQ', 'facultyNotifications', 'facultyProfileMenu', 'facultySchedule',
 ]);
@@ -553,6 +581,18 @@ function AppContent() {
   // cancelling?" pop-up is open and the AI checks the reason.
   const [cancelReasonTarget, setCancelReasonTarget] = useState<Appointment | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('student');
+  // A new student must save their weekly class schedule before reaching Home.
+  // 'needed' keeps them on the setup screen; 'done' lets them through.
+  const [classScheduleStatus, setClassScheduleStatus] = useState<'needed' | 'done'>('done');
+  // The student's own saved classes (used by the setup / "My Class Schedule" screen).
+  const [studentClasses, setStudentClasses] = useState<ClassBlock[]>([]);
+  const [studentClassesLoading, setStudentClassesLoading] = useState(true);
+  // True when the classes could not be loaded for the booking screens.
+  const [studentClassesError, setStudentClassesError] = useState(false);
+  // The student's classes as seen by a faculty member who is rescheduling their appointment.
+  const [rescheduleClasses, setRescheduleClasses] = useState<ClassBlock[]>([]);
+  const [rescheduleClassesLoading, setRescheduleClassesLoading] = useState(true);
+  const [rescheduleClassesError, setRescheduleClassesError] = useState(false);
 
   // Keeps unsaved Personal Information edits available even if the user
   // leaves the Personal Information screen before pressing Save Changes.
@@ -643,6 +683,9 @@ function AppContent() {
         yearLevel: student?.year_level ?? '',
         photoUri: profile.avatar_url ?? undefined,
       });
+      // Only an explicit `false` forces the setup screen; if the database column is not
+      // there yet (SQL not run) nobody gets locked out.
+      setClassScheduleStatus(student?.class_schedule_completed === false ? 'needed' : 'done');
       setUserRole('student');
       return 'student';
     }
@@ -662,6 +705,7 @@ function AppContent() {
       photoUri: profile.avatar_url ?? undefined,
       consultationTypes: faculty?.consultation_types ?? 'Face-to-Face   Online',
     });
+    setClassScheduleStatus('done');
     setUserRole('faculty');
     return 'faculty';
   };
@@ -1000,6 +1044,14 @@ function AppContent() {
   const [facultyDirectory, setFacultyDirectory] = useState<FacultyMember[]>([]);
   const [facultyDirectoryLoading, setFacultyDirectoryLoading] = useState(false);
   const [selectedFaculty, setSelectedFaculty] = useState<FacultyMember | null>(null);
+  // 'view': opened from the Directory (details only). 'book': opened from the + button (can book).
+  const [profileMode, setProfileMode] = useState<'view' | 'book'>('view');
+  // Screen the + button was pressed on, so Back returns there.
+  const [bookInstructorsReturn, setBookInstructorsReturn] = useState<Screen>('home');
+  // The only instructors a student can book: the ones from their own department.
+  const sameDepartmentFaculty = facultyDirectory.filter((f) =>
+    isSameDepartment(f.department, studentProfile.department)
+  );
 
   useEffect(() => {
     if (!session) {
@@ -1055,7 +1107,7 @@ function AppContent() {
   // student opens the directory or a faculty profile.
   useEffect(() => {
     if (!session || userRole !== 'student') return;
-    if (screen !== 'directory' && screen !== 'facultyProfile') return;
+    if (screen !== 'directory' && screen !== 'facultyProfile' && screen !== 'bookInstructors') return;
     let isMounted = true;
 
     supabase
@@ -1843,6 +1895,103 @@ function AppContent() {
     });
   }, [screen]);
 
+  // Mandatory class-schedule setup: while it is still needed, a signed-in student can only
+  // be on the setup screen (or an auth screen). Runs before the screen is painted, so Home
+  // never flashes up first.
+  useLayoutEffect(() => {
+    if (!session || userRole !== 'student' || classScheduleStatus !== 'needed') return;
+    const isAuthRoute =
+      screen === 'login' ||
+      screen === 'forgotPassword' ||
+      screen === 'resetPassword' ||
+      screen === 'accountType' ||
+      screen === 'studentSignUp' ||
+      screen === 'facultySignUp' ||
+      screen === 'verifyEmail';
+    if (isAuthRoute || screen === 'studentClassSchedule') return;
+    setScreen('studentClassSchedule');
+  }, [session, userRole, classScheduleStatus, screen]);
+
+  // Load the student's saved classes whenever the setup / edit screen opens.
+  useEffect(() => {
+    if (screen !== 'studentClassSchedule' || !session) return;
+    let isMounted = true;
+    setStudentClassesLoading(true);
+    fetchStudentClassSchedule(session.user.id).then(({ classes, error }) => {
+      if (!isMounted) return;
+      if (error) console.log('Failed to load class schedule:', error);
+      setStudentClasses(classes);
+      setStudentClassesLoading(false);
+    });
+    return () => {
+      isMounted = false;
+      setStudentClassesLoading(true);
+    };
+  }, [screen, session?.user.id]);
+
+  // The booking screens need the student's classes too. They used to be loaded
+  // only on the schedule setup screen, so after reopening the app the booking
+  // list had no classes to compare against and never flagged a conflict.
+  useEffect(() => {
+    if (!session || (screen !== 'bookAppointment' && screen !== 'rescheduleAppointment')) return;
+    let isMounted = true;
+    setStudentClassesLoading(true);
+    setStudentClassesError(false);
+    fetchStudentClassSchedule(session.user.id).then(({ classes, error }) => {
+      if (!isMounted) return;
+      if (error) {
+        console.log('Failed to load class schedule for booking:', error);
+        setStudentClassesError(true);
+      } else {
+        setStudentClasses(classes);
+      }
+      setStudentClassesLoading(false);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [screen, session?.user.id]);
+
+  // Faculty rescheduling: load the booked student's classes so overlaps can be flagged.
+  useEffect(() => {
+    if (screen !== 'facultyRescheduleAppointment') return;
+    const studentId = facultyActionAppointment?.studentUserId;
+    if (!studentId) {
+      setRescheduleClasses([]);
+      setRescheduleClassesError(false);
+      setRescheduleClassesLoading(false);
+      return;
+    }
+    let isMounted = true;
+    setRescheduleClasses([]);
+    setRescheduleClassesError(false);
+    setRescheduleClassesLoading(true);
+    fetchStudentClassSchedule(studentId).then(({ classes, error }) => {
+      if (!isMounted) return;
+      if (error) {
+        console.log("Failed to load the student's class schedule:", error);
+        setRescheduleClassesError(true);
+      } else {
+        setRescheduleClasses(classes);
+      }
+      setRescheduleClassesLoading(false);
+    });
+    return () => {
+      isMounted = false;
+      setRescheduleClassesLoading(true);
+    };
+  }, [screen, facultyActionAppointment?.id]);
+
+  const handleSaveStudentClassSchedule = async (classes: NewClassBlock[], noClasses: boolean) => {
+    if (!session) throw new Error('You are signed out. Please log in again.');
+    const wasOnboarding = classScheduleStatus === 'needed';
+    const error = await saveStudentClassSchedule(session.user.id, noClasses ? [] : classes);
+    if (error) throw new Error(`Could not save your class schedule: ${error}`);
+    setClassScheduleStatus('done');
+    showToast(wasOnboarding ? 'Class schedule saved — welcome to AppointPro!' : 'Class schedule updated.');
+    setScreen(wasOnboarding ? 'home' : 'profile');
+  };
+
   const handleTabChange = (tab: TabKey) => {
     setQueueViewFacultyId(null);
     switch (tab) {
@@ -2136,6 +2285,29 @@ function AppContent() {
       return;
     }
 
+    // "Repeat Weekly" (on by default) promises the slot repeats every week for the
+    // semester, but this used to be ignored and only a single slot was saved.
+    if (data.recurring) {
+      const firstDay = new Date(`${addSlotForDate}T00:00:00`);
+      const lastDay = new Date(firstDay);
+      lastDay.setDate(firstDay.getDate() + 16 * 7 - 1);
+      await handleCreateRecurringRule({
+        id: `rule-${Date.now()}`,
+        daysOfWeek: [firstDay.getDay()],
+        startHour: parseInt(data.startHour, 10),
+        startMinute: parseInt(data.startMinute, 10),
+        startPeriod: data.startPeriod,
+        endHour: parseInt(data.endHour, 10),
+        endMinute: parseInt(data.endMinute, 10),
+        endPeriod: data.endPeriod,
+        mode: data.mode,
+        location: data.location,
+        createdDateKey: addSlotForDate,
+        semesterEndDateKey: toDateKey(lastDay),
+      });
+      return;
+    }
+
     const { data: inserted, error } = await supabase
       .from('availability_slots')
       .insert({
@@ -2169,6 +2341,55 @@ function AppContent() {
     const startTime = to24hTime(rule.startHour, rule.startMinute, rule.startPeriod);
     const endTime = to24hTime(rule.endHour, rule.endMinute, rule.endPeriod);
     const totalMinutes = minutesBetween(startTime, endTime);
+    const toFullTime = (t: string) => (t.length === 5 ? `${t}:00` : t);
+
+    // Work out which dates can get a slot. A date that already has an overlapping
+    // slot is skipped, otherwise the same minutes could be booked twice.
+    const { data: existingRows, error: existingError } = await supabase
+      .from('availability_slots')
+      .select('date,start_time,end_time')
+      .eq('faculty_id', session.user.id)
+      .gte('date', rule.createdDateKey)
+      .lte('date', rule.semesterEndDateKey);
+    if (existingError) {
+      showToast('Could not check your existing schedule. Please try again.');
+      return;
+    }
+    const occupied = new Map<string, { start: string; end: string }[]>();
+    ((existingRows ?? []) as { date: string; start_time: string; end_time: string }[]).forEach((row) => {
+      occupied.set(row.date, [
+        ...(occupied.get(row.date) ?? []),
+        { start: toFullTime(row.start_time), end: toFullTime(row.end_time) },
+      ]);
+    });
+
+    const freeDates: string[] = [];
+    let skippedDates = 0;
+    const start = new Date(rule.createdDateKey + 'T00:00:00');
+    const end = new Date(rule.semesterEndDateKey + 'T00:00:00');
+    const cursor = new Date(start);
+    let safety = 0;
+    while (cursor <= end && safety < 400) {
+      safety++;
+      if (rule.daysOfWeek.includes(cursor.getDay())) {
+        const dateKey = toDateKey(cursor);
+        const clashes = (occupied.get(dateKey) ?? []).some((range) =>
+          timeRangesOverlap(range.start, range.end, startTime, endTime)
+        );
+        if (clashes) skippedDates++;
+        else freeDates.push(dateKey);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    if (!freeDates.length) {
+      showToast(
+        skippedDates > 0
+          ? 'Every matching day already has an overlapping slot, so nothing was added.'
+          : 'No matching days fall inside that date range.'
+      );
+      return;
+    }
 
     const { data: insertedRule, error: ruleError } = await supabase
       .from('recurring_rules')
@@ -2190,29 +2411,17 @@ function AppContent() {
       return;
     }
 
-    // Generate one concrete availability_slots row per matching date in
-    // the range, and insert them all in a single call.
-    const start = new Date(rule.createdDateKey + 'T00:00:00');
-    const end = new Date(rule.semesterEndDateKey + 'T00:00:00');
-    const rowsToInsert: Record<string, unknown>[] = [];
-    const cursor = new Date(start);
-    let safety = 0;
-    while (cursor <= end && safety < 400) {
-      safety++;
-      if (rule.daysOfWeek.includes(cursor.getDay())) {
-        rowsToInsert.push({
-          faculty_id: session.user.id,
-          rule_id: insertedRule.id,
-          date: toDateKey(cursor),
-          start_time: startTime,
-          end_time: endTime,
-          mode: rule.mode,
-          location: rule.location,
-          total_minutes: totalMinutes,
-        });
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
+    // One concrete availability_slots row per free date, inserted in a single call.
+    const rowsToInsert = freeDates.map((dateKey) => ({
+      faculty_id: session.user.id,
+      rule_id: insertedRule.id,
+      date: dateKey,
+      start_time: startTime,
+      end_time: endTime,
+      mode: rule.mode,
+      location: rule.location,
+      total_minutes: totalMinutes,
+    }));
 
     const { data: insertedSlots, error: slotsError } = await supabase
       .from('availability_slots')
@@ -2220,7 +2429,10 @@ function AppContent() {
       .select();
 
     if (slotsError) {
-      showToast('Recurring schedule saved, but some slots failed to generate.');
+      // Don't leave a rule behind that has no slots.
+      await supabase.from('recurring_rules').delete().eq('id', insertedRule.id);
+      showToast('Could not create the recurring slots: ' + slotsError.message);
+      return;
     }
 
     const generatedSlots = (insertedSlots ?? []) as AvailabilitySlotRow[];
@@ -2233,6 +2445,11 @@ function AppContent() {
     });
     setRecurringRules((prev) => [...prev, mapRecurringRuleRow(insertedRule as RecurringRuleRow)]);
     setScreen('facultyAvailability');
+    if (skippedDates > 0) {
+      showToast(
+        `${skippedDates} day${skippedDates === 1 ? '' : 's'} skipped because an overlapping slot already exists.`
+      );
+    }
   };
 
   const handleOpenSlotIQ = () => {
@@ -3069,6 +3286,24 @@ function AppContent() {
 
     actionInFlightRef.current = true;
     try {
+      // Never move the appointment onto one of the student's classes.
+      if (session) {
+        const { classes: freshClasses, error: classesError } = await fetchStudentClassSchedule(session.user.id);
+        if (classesError) {
+          showToast("Couldn't check your class schedule. Please try again.");
+          return;
+        }
+        const classClash = findStudentBookingConflict(freshClasses, {
+          dayOfWeek: dayOfWeekFromDateKey(realDateKey),
+          startTime: newStartTime24,
+          endTime: newEndTime24,
+        });
+        if (classClash) {
+          Alert.alert('Class Conflict', conflictMessage(classClash));
+          return;
+        }
+      }
+
       // Make sure moving this appointment doesn't land it on top of
       // another appointment the student already has (excluding itself).
       if (session) {
@@ -3204,6 +3439,26 @@ function AppContent() {
     actionInFlightRef.current = true;
     try {
       if (appt.studentUserId) {
+        // Never move an appointment onto one of the student's classes. The classes are read
+        // fresh here (not from the screen) so a change made a moment ago is respected.
+        const { classes: studentClassBlocks, error: classesError } = await fetchStudentClassSchedule(
+          appt.studentUserId
+        );
+        if (classesError) {
+          showToast("Couldn't check the student's class schedule. Please try again.");
+          return;
+        }
+        const classConflict = findScheduleConflict(studentClassBlocks, {
+          dayOfWeek: dayOfWeekFromDateKey(realDateKey),
+          startTime: normalizeTime(newStartTime24),
+          endTime: normalizeTime(newEndTime24),
+        });
+        if (classConflict) {
+          const conflictText = describeConflict(classConflict);
+          Alert.alert(conflictText.title, conflictText.body);
+          return;
+        }
+
         // Only appointments this faculty can see are checked (RLS), so this is
         // a best-effort guard against double-booking the student.
         const { conflict, checkFailed } = await findStudentScheduleConflict(
@@ -3701,7 +3956,25 @@ function AppContent() {
             faculty={facultyDirectory}
             loading={facultyDirectoryLoading}
             onSelectFaculty={(faculty) => {
+              // The Directory is view-only: details, no booking.
+              setProfileMode('view');
               setSelectedFaculty(faculty);
+              setScreen('facultyProfile');
+            }}
+            onTabChange={handleTabChange}
+          />
+        )}
+
+        {screen === 'bookInstructors' && (
+          <BookInstructorScreen
+            faculty={sameDepartmentFaculty}
+            studentDepartment={studentProfile.department}
+            loading={facultyDirectoryLoading}
+            onBack={() => setScreen(bookInstructorsReturn)}
+            onSelectFaculty={(faculty) => {
+              setProfileMode('book');
+              setSelectedFaculty(faculty);
+              setIsChoosingAfterReject(false);
               setScreen('facultyProfile');
             }}
             onTabChange={handleTabChange}
@@ -3718,7 +3991,8 @@ function AppContent() {
             facultyPhotoUri={selectedFaculty?.photoUri}
             consultationTypes={selectedFaculty?.consultationTypes}
             loading={scheduleLoading}
-            onBack={() => setScreen('directory')}
+            mode={profileMode}
+            onBack={() => setScreen(profileMode === 'book' ? 'bookInstructors' : 'directory')}
             onMorePress={() => showToast('More options coming soon')}
             onSelectSlot={(date, slot) => {
               setBookingPreselect({ date, slotId: slot.id });
@@ -3743,6 +4017,9 @@ function AppContent() {
             scheduleByDate={scheduleByDate}
             studentName={studentProfile.name}
             mode="book"
+            studentClasses={studentClasses}
+            studentClassesLoading={studentClassesLoading}
+            studentClassesError={studentClassesError}
             doctorName={selectedFaculty?.name ?? 'Faculty member'}
             department={selectedFaculty?.department ?? ''}
             initialDate={bookingPreselect?.date}
@@ -3750,6 +4027,14 @@ function AppContent() {
             onBack={() => setScreen(isChoosingAfterReject ? 'home' : 'facultyProfile')}
             onContinue={async (selection) => {
               if (!session || !selectedFaculty) return;
+
+              // New bookings are limited to the student's own department. (Picking a new
+              // time after a rejected reschedule is for an existing appointment, so it is exempt.)
+              if (!isChoosingAfterReject && !isSameDepartment(selectedFaculty.department, studentProfile.department)) {
+                showToast('You can only book instructors from your own department.');
+                setScreen('bookInstructors');
+                return;
+              }
 
               if (!(await isFacultyAcceptingBookings(selectedFaculty.id))) {
                 const unavailable = { ...selectedFaculty, status: 'unavailable' as const };
@@ -3794,6 +4079,25 @@ function AppContent() {
               const [startLabelPart, endLabelPart] = bookedTimeRangeLabel.split(' - ');
               const newStartTime24 = labelTo24h(startLabelPart);
               const newEndTime24 = labelTo24h(endLabelPart);
+
+              // Never book a time that overlaps one of the student's classes. The
+              // classes are read fresh so a change made a moment ago is respected.
+              const { classes: freshClasses, error: classesError } = await fetchStudentClassSchedule(
+                session.user.id
+              );
+              if (classesError) {
+                showToast("Couldn't check your class schedule. Please try again.");
+                return;
+              }
+              const classClash = findStudentBookingConflict(freshClasses, {
+                dayOfWeek: dayOfWeekFromDateKey(realDateKey),
+                startTime: newStartTime24,
+                endTime: newEndTime24,
+              });
+              if (classClash) {
+                Alert.alert('Class Conflict', conflictMessage(classClash));
+                return;
+              }
 
               // Never let a student end up with two overlapping
               // appointments — whether with this same faculty member or
@@ -3848,7 +4152,16 @@ function AppContent() {
                 duration_minutes: selection.durationMinutes,
               });
               if (bookingRowError) {
-                showToast('Booked, but capacity tracking failed to save.');
+                // The minutes could not be reserved (usually because another student just
+                // took them). Don't leave an unreserved appointment behind that the
+                // slot would still show as free.
+                await supabase
+                  .from('appointments')
+                  .update({ status: 'canceled', updated_at: new Date().toISOString() })
+                  .eq('id', insertedAppt.id);
+                setScheduleByDate(await fetchFacultyWeekSchedule(selectedFaculty.id));
+                showToast('That time was just taken. Please pick another.');
+                return;
               }
 
               sendNotification(selectedFaculty.id, {
@@ -3876,6 +4189,9 @@ function AppContent() {
             scheduleByDate={scheduleByDate}
             studentName={studentProfile.name}
             mode="reschedule"
+            studentClasses={studentClasses}
+            studentClassesLoading={studentClassesLoading}
+            studentClassesError={studentClassesError}
             doctorName={actionAppointment?.doctorName ?? selectedFaculty?.name ?? 'Faculty member'}
             department={actionAppointment?.department ?? selectedFaculty?.department ?? ''}
             onBack={() => setScreen('appointmentDetails')}
@@ -3998,11 +4314,23 @@ function AppContent() {
           />
         )}
 
+        {screen === 'studentClassSchedule' && (
+          <StudentScheduleOnboardingScreen
+            mode={classScheduleStatus === 'needed' ? 'onboarding' : 'edit'}
+            loading={studentClassesLoading}
+            initialClasses={studentClasses}
+            onSave={handleSaveStudentClassSchedule}
+            onBack={() => setScreen('profile')}
+            onLogout={handleLogout}
+          />
+        )}
+
         {screen === 'profile' && (
           <ProfileScreen
             {...studentProfile}
             onBack={() => setScreen('home')}
             onPersonalInformation={() => goToPersonalInformation('profile')}
+            onClassSchedule={() => setScreen('studentClassSchedule')}
             onAbout={() => goToAbout('profile')}
             onSettings={() => {
               setPreviousScreen('profile');
@@ -4281,6 +4609,9 @@ function AppContent() {
               setFacultyActionAppointment(null);
               setScreen('facultyDirectory');
             }}
+            studentClasses={rescheduleClasses}
+            studentClassesLoading={rescheduleClassesLoading}
+            studentClassesError={rescheduleClassesError}
             onConfirm={handleFacultyReschedule}
           />
         )}
@@ -4348,6 +4679,22 @@ function AppContent() {
             onAddTimeSlot={() => handleAddTimeSlot(toDateKey(new Date()))}
             onSetRecurringSchedule={() => openScheduleForm('recurringSchedule')}
             onOpenSlotIQ={handleOpenSlotIQ}
+          />
+        )}
+
+      {(screen === 'home' ||
+          screen === 'directory' ||
+          screen === 'appointments' ||
+          screen === 'notifications' ||
+          screen === 'profile') && (
+          <StudentFab
+            // Sit above the bottom tab bar.
+            bottomOffset={62}
+            onPress={() => {
+              setQueueViewFacultyId(null);
+              setBookInstructorsReturn(screen);
+              setScreen('bookInstructors');
+            }}
           />
         )}
 

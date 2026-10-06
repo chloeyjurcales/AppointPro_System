@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 
@@ -102,10 +102,9 @@ function Select({ value, options, placeholder, onChange, accessibilityLabel, has
   const selected = options.find((option) => option.value === value);
   return (
     <>
-      <TouchableOpacity
+      <Pressable
         style={[styles.field, { flex }, hasError && styles.fieldError]}
         onPress={() => setOpen(true)}
-        activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
       >
@@ -113,9 +112,9 @@ function Select({ value, options, placeholder, onChange, accessibilityLabel, has
           {selected ? selected.label : placeholder}
         </Text>
         <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
-      </TouchableOpacity>
+      </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="none" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <Text style={styles.sheetTitle}>{accessibilityLabel}</Text>
@@ -123,18 +122,17 @@ function Select({ value, options, placeholder, onChange, accessibilityLabel, has
               {options.map((option) => {
                 const isSelected = option.value === value;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={option.value}
                     style={[styles.option, isSelected && styles.optionSelected]}
                     onPress={() => {
                       onChange(option.value);
                       setOpen(false);
                     }}
-                    activeOpacity={0.8}
                   >
                     <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>{option.label}</Text>
                     {isSelected && <Ionicons name="checkmark" size={18} color={colors.primary} />}
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </ScrollView>
