@@ -461,6 +461,11 @@
   color: var(--brand-400, #b3153a);
 }
 
+.av-status-pending {
+  background: var(--color-warning-bg, #fdf3e0);
+  color: var(--color-warning, #b7791f);
+}
+
 .av-status-completed {
   background: var(--color-success-bg, #e4f6eb);
   color: var(--color-success, #1f9d55);
@@ -508,6 +513,16 @@
 
 .av-row-btn-danger:hover {
   background: var(--color-danger, #d93025);
+  color: #ffffff;
+}
+
+.av-row-btn-approve {
+  background: var(--color-success-bg, #e4f6eb);
+  color: var(--color-success, #1f9d55);
+}
+
+.av-row-btn-approve:hover {
+  background: var(--color-success, #1f9d55);
   color: #ffffff;
 }
 

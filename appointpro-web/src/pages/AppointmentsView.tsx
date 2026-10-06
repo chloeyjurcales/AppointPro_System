@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import { canceledMessage, formatWhen, rescheduledMessage } from '../lib/notificationMessages';
+import {
+  approvedMessage,
+  canceledMessage,
+  declinedMessage,
+  formatWhen,
+  rescheduledMessage,
+} from '../lib/notificationMessages';
 import './AppointmentsView.css';
 
 type AppointmentStatus = 'Upcoming' | 'Completed' | 'Cancelled';
@@ -24,6 +30,11 @@ type Appointment = {
   studentUserId: string | undefined;
   // Only approved appointments may join the live queue / get reminders.
   approved: boolean;
+  // Students submit a request; only the faculty member can approve/decline
+  // it (mirrors the mobile app's `faculty_approval_status`).
+  approvalStatus: 'pending' | 'approved' | 'declined';
+  purpose: string | null;
+  category: string | null;
   // Real Date fields power the reminder/queue features below. `startsAt` is
   // this student's own turn start; `blockStart`/`blockEnd` describe the
   // underlying faculty schedule block the appointment falls in (e.g. a
@@ -34,11 +45,12 @@ type Appointment = {
   blockEnd: Date;
 };
 
-type TabId = 'all' | 'upcoming' | 'completed' | 'cancelled';
+type TabId = 'all' | 'pending' | 'upcoming' | 'completed' | 'cancelled';
 
 type ModalState =
   | { type: 'none' }
   | { type: 'cancel'; appointment: Appointment }
+  | { type: 'decline'; appointment: Appointment }
   | { type: 'reschedule'; appointment: Appointment }
   | { type: 'details'; appointment: Appointment };
 
@@ -222,6 +234,9 @@ function mapDbAppointment(row: DbAppointment): Appointment {
     location: row.location,
     studentUserId: row.student_id,
     approved: (row.faculty_approval_status ?? 'approved') === 'approved',
+    approvalStatus: row.faculty_approval_status ?? 'approved',
+    purpose: row.purpose,
+    category: row.category,
     date: formatDbDateLabel(row.date),
     time: `${formatDbTime(row.start_time)} - ${formatDbTime(row.end_time)}`,
     startsAt,
@@ -261,6 +276,11 @@ function combineDateAndTime(dateValue: string, timeValue: string): Date {
   const [year, month, day] = dateValue.split('-').map(Number);
   const [hour, minute] = timeValue.split(':').map(Number);
   return new Date(year, month - 1, day, hour, minute);
+}
+
+// A request the student submitted that the faculty hasn't answered yet.
+function isPendingApproval(appt: Appointment): boolean {
+  return appt.status === 'Upcoming' && appt.approvalStatus === 'pending';
 }
 
 type AppointmentsViewProps = {
@@ -343,6 +363,12 @@ export default function AppointmentsView({
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
 
   const [cancelReason, setCancelReason] = useState('');
+  const [declineReason, setDeclineReason] = useState('');
+  // Blocks a double-click from approving/declining the same request twice.
+  const actionInFlightRef = useRef(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  // True while a cancel is waiting on the database (disables the buttons).
+  const [actionBusy, setActionBusy] = useState(false);
 
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleStart, setRescheduleStart] = useState('');
@@ -483,7 +509,10 @@ export default function AppointmentsView({
   const counts = useMemo(
     () => ({
       all: appointments.length,
-      upcoming: appointments.filter((a) => a.status === 'Upcoming').length,
+      pending: appointments.filter(isPendingApproval).length,
+      upcoming: appointments.filter(
+        (a) => a.status === 'Upcoming' && !isPendingApproval(a),
+      ).length,
       completed: appointments.filter((a) => a.status === 'Completed').length,
       cancelled: appointments.filter((a) => a.status === 'Cancelled').length,
     }),
@@ -492,6 +521,7 @@ export default function AppointmentsView({
 
   const tabs: { id: TabId; label: string; count: number }[] = [
     { id: 'all', label: 'All', count: counts.all },
+    { id: 'pending', label: 'Pending Approval', count: counts.pending },
     { id: 'upcoming', label: 'Upcoming', count: counts.upcoming },
     { id: 'completed', label: 'Completed', count: counts.completed },
     { id: 'cancelled', label: 'Cancelled', count: counts.cancelled },
@@ -504,7 +534,13 @@ export default function AppointmentsView({
     ? appointments.filter((a) => normRef(a.referenceNo).includes(refQuery))
     : activeTab === 'all'
       ? appointments
-      : appointments.filter((a) => a.status.toLowerCase() === activeTab);
+      : activeTab === 'pending'
+        ? appointments.filter(isPendingApproval)
+        : activeTab === 'upcoming'
+          ? appointments.filter(
+              (a) => a.status === 'Upcoming' && !isPendingApproval(a),
+            )
+          : appointments.filter((a) => a.status.toLowerCase() === activeTab);
 
   const closeModal = () => setModal({ type: 'none' });
 
@@ -530,39 +566,200 @@ export default function AppointmentsView({
     setModal({ type: 'reschedule', appointment });
   };
 
-  const confirmCancel = () => {
-    if (modal.type !== 'cancel' || !cancelReason.trim()) return;
+  const openDecline = (appointment: Appointment) => {
+    setDeclineReason('');
+    setModal({ type: 'decline', appointment });
+  };
 
-    const { id, date, time, studentUserId } = modal.appointment;
+  // Approve a pending request. The update is guarded on
+  // `faculty_approval_status = 'pending'` so a request that was already
+  // answered (e.g. from the mobile app) is never overwritten, and the UI
+  // only changes once the database confirms it.
+  const approveAppointment = async (appt: Appointment) => {
+    if (actionInFlightRef.current || !isPendingApproval(appt)) return;
+    actionInFlightRef.current = true;
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          student_approval_status: 'approved',
+          faculty_approval_status: 'approved',
+          status: 'upcoming',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', appt.id)
+        .eq('faculty_id', facultyId)
+        .eq('faculty_approval_status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        window.alert('Could not approve appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        window.alert('This appointment was already processed or is no longer available.');
+        return;
+      }
+
+      // Now eligible for the live queue — start from a clean queue row.
+      await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
+
+      setAppointments((prev) =>
+        prev.map((a) =>
+          a.id === appt.id ? { ...a, approvalStatus: 'approved', approved: true } : a,
+        ),
+      );
+      setActionNotice(`${appt.studentName}'s appointment was approved.`);
+
+      if (appt.studentUserId) {
+        await supabase.from('notifications').insert({
+          user_id: appt.studentUserId,
+          sender_id: facultyId,
+          ...approvedMessage(
+            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+            { purpose: appt.purpose, category: appt.category },
+            formatWhen({ dateLabel: appt.date, timeLabel: appt.time }),
+          ),
+        });
+      }
+    } finally {
+      actionInFlightRef.current = false;
+    }
+  };
+
+  const confirmDecline = async () => {
+    if (modal.type !== 'decline' || actionInFlightRef.current) return;
+    const appt = modal.appointment;
+    if (!isPendingApproval(appt)) {
+      closeModal();
+      return;
+    }
+    const reason = declineReason.trim();
+
+    actionInFlightRef.current = true;
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          student_approval_status: 'approved',
+          faculty_approval_status: 'declined',
+          status: 'canceled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', appt.id)
+        .eq('faculty_id', facultyId)
+        .eq('faculty_approval_status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        window.alert('Could not decline appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        window.alert('This appointment was already processed or is no longer available.');
+        closeModal();
+        return;
+      }
+
+      setAppointments((prev) =>
+        prev.map((a) =>
+          a.id === appt.id ? { ...a, status: 'Cancelled', approvalStatus: 'declined' } : a,
+        ),
+      );
+      closeModal();
+      setActionNotice(`${appt.studentName}'s appointment was declined.`);
+
+      // Free the reserved minutes in the shared slot and any queue spot.
+      await supabase.from('slot_bookings').delete().eq('appointment_id', appt.id);
+      await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
+
+      if (appt.studentUserId) {
+        await supabase.from('notifications').insert({
+          user_id: appt.studentUserId,
+          sender_id: facultyId,
+          ...declinedMessage(
+            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+            { purpose: appt.purpose, category: appt.category },
+            formatWhen({ dateLabel: appt.date, timeLabel: appt.time }),
+            reason,
+          ),
+        });
+      }
+    } finally {
+      actionInFlightRef.current = false;
+    }
+  };
+
+  // Cancels an appointment on behalf of the faculty. Nothing changes on screen
+  // (and the student is not told) until the database confirms the cancel, so a
+  // failed update can't leave the web out of sync with what students see.
+  const confirmCancel = async () => {
+    if (modal.type !== 'cancel' || !cancelReason.trim()) return;
+    if (actionInFlightRef.current) return;
+
+    const appt = modal.appointment;
+    const { id, date, time, studentUserId } = appt;
     const reason = cancelReason.trim();
 
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: 'Cancelled' } : a)),
-    );
-    closeModal();
+    actionInFlightRef.current = true;
+    setActionBusy(true);
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('faculty_id', facultyId)
+        .neq('status', 'canceled')
+        .select('id')
+        .maybeSingle();
 
-    supabase
-      .from('appointments')
-      .update({ status: 'canceled' })
-      .eq('id', id)
-      .then(({ error }) => {
-        if (error) window.alert('Could not cancel appointment: ' + error.message);
-      });
+      if (error) {
+        window.alert('Could not cancel appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        window.alert('This appointment was already cancelled or is no longer available.');
+        closeModal();
+        return;
+      }
 
-    // The appointment no longer occupies its slot's capacity, or a queue spot.
-    supabase.from('slot_bookings').delete().eq('appointment_id', id);
-    supabase.from('queue_entries').delete().eq('appointment_id', id);
+      setAppointments((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: 'Cancelled' } : a)),
+      );
+      closeModal();
+      setActionNotice(`${appt.studentName}'s appointment was cancelled.`);
 
-    if (studentUserId) {
-      supabase.from('notifications').insert({
-        user_id: studentUserId,
-        sender_id: facultyId,
-        ...canceledMessage(
-          { name: facultyName, department: facultyDepartment, role: 'Faculty' },
-          formatWhen({ dateLabel: date, timeLabel: time }),
-          reason,
-        ),
-      });
+      // Free the reserved minutes in the shared slot and drop any queue spot
+      // (best effort — the appointment itself is already cancelled).
+      const { error: bookingError } = await supabase
+        .from('slot_bookings')
+        .delete()
+        .eq('appointment_id', id);
+      if (bookingError) console.log('Failed to release slot capacity:', bookingError.message);
+
+      const { error: queueError } = await supabase
+        .from('queue_entries')
+        .delete()
+        .eq('appointment_id', id);
+      if (queueError) console.log('Failed to remove queue entry:', queueError.message);
+
+      if (studentUserId) {
+        const { error: notifyError } = await supabase.from('notifications').insert({
+          user_id: studentUserId,
+          sender_id: facultyId,
+          ...canceledMessage(
+            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+            formatWhen({ dateLabel: date, timeLabel: time }),
+            reason,
+          ),
+        });
+        if (notifyError) console.log('Failed to notify student:', notifyError.message);
+      }
+    } finally {
+      actionInFlightRef.current = false;
+      setActionBusy(false);
     }
   };
 
@@ -712,6 +909,20 @@ export default function AppointmentsView({
             type="button"
             aria-label="Dismiss"
             onClick={() => setQueueNotice(null)}
+          >
+            <XSmallIcon />
+          </button>
+        </div>
+      )}
+
+      {actionNotice && (
+        <div className="av-queue-toast">
+          <CheckSmallIcon />
+          <span>{actionNotice}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setActionNotice(null)}
           >
             <XSmallIcon />
           </button>
@@ -890,13 +1101,32 @@ export default function AppointmentsView({
                 <td className="av-reason">{appt.reason}</td>
                 <td>
                   <span
-                    className={`av-status av-status-${appt.status.toLowerCase()}`}
+                    className={`av-status av-status-${
+                      isPendingApproval(appt) ? 'pending' : appt.status.toLowerCase()
+                    }`}
                   >
-                    {appt.status}
+                    {isPendingApproval(appt) ? 'Pending' : appt.status}
                   </span>
                 </td>
                 <td>
-                  {appt.status === 'Upcoming' ? (
+                  {isPendingApproval(appt) ? (
+                    <div className="av-actions">
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-approve"
+                        onClick={() => approveAppointment(appt)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-danger"
+                        onClick={() => openDecline(appt)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  ) : appt.status === 'Upcoming' ? (
                     <div className="av-actions">
                       <button
                         type="button"
@@ -933,7 +1163,9 @@ export default function AppointmentsView({
                     <span className="av-empty-title">
                       {refQuery
                         ? 'No appointment found with that reference number'
-                        : 'No appointments in this category'}
+                        : activeTab === 'pending'
+                          ? 'No requests waiting for your approval'
+                          : 'No appointments in this category'}
                     </span>
                     <span className="av-empty-subtitle">
                       New bookings will show up here as students schedule
@@ -1083,10 +1315,10 @@ export default function AppointmentsView({
                   <button
                     type="button"
                     className="av-modal-btn av-modal-btn-danger"
-                    disabled={!cancelReason.trim()}
+                    disabled={!cancelReason.trim() || actionBusy}
                     onClick={confirmCancel}
                   >
-                    Cancel Appointment
+                    {actionBusy ? 'Cancelling…' : 'Cancel Appointment'}
                   </button>
                   <button
                     type="button"
@@ -1094,6 +1326,62 @@ export default function AppointmentsView({
                     onClick={closeModal}
                   >
                     Keep Appointment
+                  </button>
+                </div>
+              </>
+            )}
+
+            {modal.type === 'decline' && (
+              <>
+                <h2>Decline Appointment Request</h2>
+
+                <div className="av-modal-summary">
+                  <p className="av-modal-summary-name">
+                    {modal.appointment.studentName}
+                  </p>
+                  <p className="av-modal-summary-line">
+                    {modal.appointment.date} · {modal.appointment.time}
+                  </p>
+                  <p className="av-modal-summary-muted">
+                    {modal.appointment.reason}
+                  </p>
+                </div>
+
+                <label className="av-modal-label" htmlFor="av-decline-reason">
+                  Reason (optional)
+                </label>
+                <textarea
+                  id="av-decline-reason"
+                  className="av-modal-textarea"
+                  rows={3}
+                  maxLength={200}
+                  placeholder="Add a reason so the student knows why..."
+                  value={declineReason}
+                  onChange={(event) => setDeclineReason(event.target.value)}
+                />
+
+                <div className="av-modal-warning">
+                  <AlertIcon />
+                  <p>
+                    The student will be notified and the requested time will be
+                    released.
+                  </p>
+                </div>
+
+                <div className="av-modal-actions">
+                  <button
+                    type="button"
+                    className="av-modal-btn av-modal-btn-danger"
+                    onClick={confirmDecline}
+                  >
+                    Decline Request
+                  </button>
+                  <button
+                    type="button"
+                    className="av-modal-btn av-modal-btn-secondary"
+                    onClick={closeModal}
+                  >
+                    Keep Request
                   </button>
                 </div>
               </>
