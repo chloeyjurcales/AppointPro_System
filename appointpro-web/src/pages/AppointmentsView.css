@@ -378,7 +378,7 @@
 }
 
 .av-table thead th {
-  text-align: left;
+  text-align: center;
   color: var(--text-secondary, #6b7280);
   font-size: 11.5px;
   font-weight: 700;
@@ -395,6 +395,7 @@
 
 .av-table tbody td {
   padding: 14px 10px;
+  text-align: center;
   border-bottom: 1px solid var(--gray-150, #f0eef0);
   color: var(--text-primary, #1a1a1a);
   vertical-align: top;
@@ -416,6 +417,7 @@
 .av-datetime {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
 }
 
@@ -433,7 +435,57 @@
   font-weight: 600;
 }
 
+.av-student-profile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.av-student-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex: 0 0 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-50, #fdf1f4);
+  color: var(--brand-500, #7a0e2c);
+  border: 1px solid var(--brand-100, #fbe3e9);
+}
+
+.av-student-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.av-student-avatar-fallback {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.av-student-profile-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.av-student-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .av-reason {
+  text-align: center;
   color: var(--text-secondary, #6b7280);
 }
 
@@ -990,4 +1042,137 @@
   font-size: 12px;
   font-weight: 500;
   color: #6b7280;
+}
+/* ---------- Mobile-style faculty action success result ---------- */
+.av-success-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(20, 12, 16, .48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.av-success-modal {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  box-shadow: 0 24px 70px rgba(30, 15, 22, .24);
+  padding: 30px;
+  text-align: center;
+}
+
+.av-success-close {
+  position: absolute;
+  right: 16px;
+  top: 14px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  background: #fff;
+  color: #777;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.av-success-icon {
+  width: 66px;
+  height: 66px;
+  margin: 4px auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 38px;
+  font-weight: 700;
+}
+
+.av-success-approved,
+.av-success-cancelled { background: var(--brand-500, #7a0e2c); }
+.av-success-rescheduled { background: #16803c; }
+
+.av-success-modal h2 {
+  margin: 0;
+  color: #1a1a1a;
+  font-size: 20px;
+}
+
+.av-success-subtitle {
+  margin: 7px 0 20px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.av-success-details {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  text-align: left;
+  padding: 18px;
+  border: 1px solid #ece8eb;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.av-success-details > strong:first-child {
+  font-size: 15px;
+  color: #1a1a1a;
+}
+
+.av-success-details > span:nth-child(2) {
+  color: #777;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.av-success-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12.5px;
+  color: #3d3d3d;
+}
+
+.av-success-divider {
+  height: 1px;
+  background: #eee;
+  margin: 7px 0;
+}
+
+.av-success-label {
+  font-size: 11px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.av-success-notice {
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: #f4f8ff;
+  color: #37516f;
+  font-size: 12px;
+  text-align: left;
+}
+
+.av-success-back {
+  width: 100%;
+  margin-top: 16px;
+  border: 1px solid var(--brand-500, #7a0e2c);
+  background: var(--brand-500, #7a0e2c);
+  color: #fff;
+  border-radius: 9px;
+  min-height: 42px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
 }

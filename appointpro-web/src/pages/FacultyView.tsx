@@ -40,6 +40,18 @@ type TimeSlot = {
   mode: ConsultationMode;
   location: string;
   enabled: boolean;
+  ruleId: string | null;
+};
+
+type EditableScheduleValues = {
+  startHour: string;
+  startMinute: string;
+  startPeriod: string;
+  endHour: string;
+  endMinute: string;
+  endPeriod: string;
+  mode: ConsultationMode;
+  location: string;
 };
 
 type RecurringSchedule = {
@@ -287,9 +299,12 @@ type FacultyViewProps = {
   session: Session;
   initialTab?: FacultyTab;
   searchQuery?: string;
-  // Lets the dashboard's top-bar/sidebar avatars update right after the
+  // Lets the dashboard's top-bar/sidebar avatar update immediately after the
   // faculty member changes or removes their photo on the Profile tab.
   onAvatarChange?: (url: string | null) => void;
+  // Keeps dashboard text such as the sidebar name and Welcome heading in sync
+  // immediately after Personal Information is saved.
+  onProfileNameChange?: (name: string) => void;
 };
 
 export default function FacultyView({
@@ -297,25 +312,21 @@ export default function FacultyView({
   initialTab = 'profile',
   searchQuery = '',
   onAvatarChange,
+  onProfileNameChange,
 }: FacultyViewProps) {
   const facultyId = session.user.id;
   const [activeTab, setActiveTab] = useState<FacultyTab>(initialTab);
 
-  // The Schedule tab only ever shows the current real week, so its overlay
-  // data is loaded once here (rather than inside ScheduleTab) so switching
-  // tabs and back doesn't refetch unnecessarily.
-  const weekDates = useMemo(() => getWeekDates(startOfWeek(new Date())), []);
+  const [scheduleWeekStart, setScheduleWeekStart] = useState(() => startOfWeek(new Date()));
+  const scheduleWeekDates = useMemo(() => getWeekDates(scheduleWeekStart), [scheduleWeekStart]);
   const [weekSlotRanges, setWeekSlotRanges] = useState<
-    Record<
-      string,
-      { start: number; end: number; mode: ConsultationMode; location: string }[]
-    >
+    Record<string, { start: number; end: number; mode: ConsultationMode; location: string }[]>
   >({});
 
   useEffect(() => {
     let isMounted = true;
-    const from = toISODate(weekDates[0]);
-    const to = toISODate(weekDates[6]);
+    const from = toISODate(scheduleWeekDates[0]);
+    const to = toISODate(scheduleWeekDates[6]);
 
     const load = () => {
       supabase
@@ -328,48 +339,31 @@ export default function FacultyView({
         .then(({ data, error }) => {
           if (!isMounted) return;
           if (error) {
-            console.log('Failed to load this week\'s availability:', error.message);
+            console.log('Failed to load schedule availability:', error.message);
             return;
           }
-          const byDate: Record<
-            string,
-            { start: number; end: number; mode: ConsultationMode; location: string }[]
-          > = {};
+          const byDate: Record<string, { start: number; end: number; mode: ConsultationMode; location: string }[]> = {};
           (data ?? []).forEach((row) => {
             const start = dbTimeToMinutes(row.start_time);
             const end = dbTimeToMinutes(row.end_time);
             if (start === null || end === null) return;
             const mode = (row.mode as ConsultationMode) ?? 'Face-to-Face';
-            byDate[row.date] = [
-              ...(byDate[row.date] ?? []),
-              { start, end, mode, location: row.location ?? '' },
-            ];
+            byDate[row.date] = [...(byDate[row.date] ?? []), { start, end, mode, location: row.location ?? '' }];
           });
           setWeekSlotRanges(byDate);
         });
     };
 
     load();
-
     const channel = supabase
-      .channel(`faculty-week-slots-${facultyId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'availability_slots',
-          filter: `faculty_id=eq.${facultyId}`,
-        },
-        () => load(),
-      )
+      .channel(`faculty-week-slots-${facultyId}-${from}-${to}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_slots', filter: `faculty_id=eq.${facultyId}` }, () => load())
       .subscribe();
-
     return () => {
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, [facultyId, weekDates]);
+  }, [facultyId, scheduleWeekDates]);
 
   // Jump to the Directory tab the moment the faculty starts typing a new
   // search (but never on mount/deep-link, even if a leftover search query
@@ -407,11 +401,21 @@ export default function FacultyView({
       </div>
 
       {activeTab === 'profile' && (
-        <ProfileTab session={session} onAvatarChange={onAvatarChange} />
+        <ProfileTab
+          session={session}
+          onAvatarChange={onAvatarChange}
+          onProfileNameChange={onProfileNameChange}
+        />
       )}
 
       {activeTab === 'schedule' && (
-        <ScheduleTab weekDates={weekDates} weekSlotRanges={weekSlotRanges} />
+        <ScheduleTab
+          weekDates={scheduleWeekDates}
+          weekSlotRanges={weekSlotRanges}
+          onPreviousWeek={() => setScheduleWeekStart((d) => addDaysToDate(d, -7))}
+          onNextWeek={() => setScheduleWeekStart((d) => addDaysToDate(d, 7))}
+          onToday={() => setScheduleWeekStart(startOfWeek(new Date()))}
+        />
       )}
 
       {activeTab === 'settings' && <AvailabilityTab facultyId={facultyId} />}
@@ -669,9 +673,11 @@ type DbFacultyRow = {
 function ProfileTab({
   session,
   onAvatarChange,
+  onProfileNameChange,
 }: {
   session: Session;
   onAvatarChange?: (url: string | null) => void;
+  onProfileNameChange?: (name: string) => void;
 }) {
   const facultyId = session.user.id;
 
@@ -853,7 +859,13 @@ function ProfileTab({
     }
 
     // A new email only takes effect once confirmed from the link Supabase sends.
-    setSavedInfo(emailChanged ? { ...form, email: savedInfo.email } : form);
+    const savedProfileInfo = emailChanged
+      ? { ...form, email: savedInfo.email }
+      : form;
+
+    setSavedInfo(savedProfileInfo);
+    onProfileNameChange?.(savedProfileInfo.name);
+
     if (emailChanged) {
       window.alert('Saved. Confirm the link sent to your new email address to finish changing it.');
     }
@@ -1068,12 +1080,15 @@ function ProfileTab({
 function ScheduleTab({
   weekDates,
   weekSlotRanges,
+  onPreviousWeek,
+  onNextWeek,
+  onToday,
 }: {
   weekDates: Date[];
-  weekSlotRanges: Record<
-    string,
-    { start: number; end: number; mode: ConsultationMode; location: string }[]
-  >;
+  weekSlotRanges: Record<string, { start: number; end: number; mode: ConsultationMode; location: string }[]>;
+  onPreviousWeek: () => void;
+  onNextWeek: () => void;
+  onToday: () => void;
 }) {
   const displayRows = useMemo(
     () => buildDisplayRows(weekSlotRanges, weekDates),
@@ -1096,7 +1111,13 @@ function ScheduleTab({
               : 'No availability set for this week yet — add slots from the Availability tab.'}
           </p>
         </div>
+        <div className="fv-schedule-nav">
+          <button type="button" onClick={onPreviousWeek} aria-label="Previous week"><ChevronLeftIcon /></button>
+          <button type="button" className="fv-schedule-today" onClick={onToday}>Today</button>
+          <button type="button" onClick={onNextWeek} aria-label="Next week"><ChevronRightIcon /></button>
+        </div>
       </div>
+      <div className="fv-schedule-week-label">{formatWeekRangeLabel(weekDates)}</div>
 
       <div className="fv-schedule-table-wrap">
         <table className="fv-schedule-table">
@@ -1294,6 +1315,7 @@ function mapDbSlot(row: DbAvailabilitySlot): TimeSlot {
   const endMin = dbTimeToMinutes(row.end_time) ?? 0;
   return {
     id: row.id,
+    ruleId: row.rule_id,
     time: `${formatTime(startMin)} - ${formatTime(endMin)}`,
     mode: row.mode,
     location: row.location,
@@ -1640,6 +1662,113 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
   const [slotError, setSlotError] = useState<string | null>(null);
   const [addedNotice, setAddedNotice] = useState<string | null>(null);
   const [savingSlot, setSavingSlot] = useState(false);
+  const [editTarget, setEditTarget] = useState<
+    | { kind: 'slot'; id: string; initial: EditableScheduleValues }
+    | { kind: 'rule'; id: string; initial: EditableScheduleValues }
+    | null
+  >(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const valuesFromTimeSlot = (slot: TimeSlot): EditableScheduleValues => {
+    const [startLabel, endLabel] = slot.time.split(' - ');
+    const start = parseTimeInput(startLabel) ?? 0;
+    const end = parseTimeInput(endLabel) ?? 0;
+    const toParts = (minutes: number) => {
+      const hour24 = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      return {
+        hour: String(hour24 % 12 || 12),
+        minute: String(minute).padStart(2, '0'),
+        period: hour24 >= 12 ? 'PM' : 'AM',
+      };
+    };
+    const a = toParts(start);
+    const b = toParts(end);
+    return {
+      startHour: a.hour, startMinute: a.minute, startPeriod: a.period,
+      endHour: b.hour, endMinute: b.minute, endPeriod: b.period,
+      mode: slot.mode, location: slot.location,
+    };
+  };
+
+
+  const openSlotEdit = async (slotId: string) => {
+    const slot = slots.find((item) => item.id === slotId);
+    if (!slot) return;
+    const { data } = await supabase.from('availability_slots').select('location, mode, start_time, end_time').eq('id', slotId).maybeSingle();
+    const initial = valuesFromTimeSlot({ ...slot, location: data?.location ?? slot.location, mode: (data?.mode as ConsultationMode) ?? slot.mode, time: data ? `${formatTime(dbTimeToMinutes(data.start_time) ?? 0)} - ${formatTime(dbTimeToMinutes(data.end_time) ?? 0)}` : slot.time });
+    setEditError(null);
+    setEditTarget({ kind: 'slot', id: slotId, initial });
+  };
+
+  const openRuleEdit = async (ruleId: string) => {
+    const { data, error } = await supabase.from('recurring_rules').select('start_time,end_time,mode,location').eq('id', ruleId).maybeSingle();
+    if (error || !data) { window.alert(error?.message ?? 'Could not load that schedule.'); return; }
+    const start = dbTimeToMinutes(data.start_time) ?? 0;
+    const end = dbTimeToMinutes(data.end_time) ?? 0;
+    const parts = (m: number) => { const h = Math.floor(m / 60); return { hour: String(h % 12 || 12), minute: String(m % 60).padStart(2, '0'), period: h >= 12 ? 'PM' : 'AM' }; };
+    const a = parts(start), b = parts(end);
+    setEditError(null);
+    setEditTarget({ kind: 'rule', id: ruleId, initial: { startHour:a.hour,startMinute:a.minute,startPeriod:a.period,endHour:b.hour,endMinute:b.minute,endPeriod:b.period,mode:data.mode as ConsultationMode,location:data.location ?? '' } });
+  };
+
+  const findBookedSlotIds = async (slotIds: string[]) => {
+    const booked = new Set<string>();
+    for (let i = 0; i < slotIds.length; i += 50) {
+      const { data, error } = await supabase.from('appointments').select('slot_id,status').in('slot_id', slotIds.slice(i, i + 50));
+      if (error) throw new Error(error.message);
+      ((data ?? []) as { slot_id: string | null; status: string }[]).forEach((row) => {
+        if (row.slot_id && !['canceled','cancelled','completed'].includes(row.status)) booked.add(row.slot_id);
+      });
+    }
+    return booked;
+  };
+
+  const saveEdit = async (values: EditableScheduleValues) => {
+    if (!editTarget || savingEdit) return;
+    const start = Number(values.startHour) % 12 + (values.startPeriod === 'PM' ? 12 : 0);
+    const end = Number(values.endHour) % 12 + (values.endPeriod === 'PM' ? 12 : 0);
+    const startMinutes = start * 60 + Number(values.startMinute);
+    const endMinutes = end * 60 + Number(values.endMinute);
+    if (startMinutes >= endMinutes) { setEditError('End time must be after the start time.'); return; }
+    if (!values.location.trim()) { setEditError(values.mode === 'Online' ? 'Enter a meeting link or platform.' : 'Enter a location.'); return; }
+    setSavingEdit(true); setEditError(null);
+    try {
+      if (editTarget.kind === 'slot') {
+        const slot = slots.find((item) => item.id === editTarget.id);
+        if (!slot) throw new Error('That slot is no longer available.');
+        const booked = await findBookedSlotIds([editTarget.id]);
+        if (booked.has(editTarget.id)) throw new Error('This slot has a booked appointment, so it cannot be edited. Turn it off or cancel the appointment first.');
+        const overlap = slots.some((item) => { const [a, b] = item.time.split(' - '); const itemStart = parseTimeInput(a ?? ''); const itemEnd = parseTimeInput(b ?? ''); return item.id !== editTarget.id && itemStart !== null && itemEnd !== null && timeRangesOverlap(startMinutes, endMinutes, itemStart, itemEnd); });
+        if (overlap) throw new Error('That time overlaps another slot on this day.');
+        const { data, error } = await supabase.from('availability_slots').update({start_time:minutesToDbTime(startMinutes),end_time:minutesToDbTime(endMinutes),mode:values.mode,location:values.location.trim(),total_minutes:endMinutes-startMinutes}).eq('id',editTarget.id).select('id,rule_id,date,start_time,end_time,mode,location,enabled').maybeSingle();
+        if (error || !data) throw new Error(error?.message ?? 'Could not update the slot.');
+        setSlots((prev) => prev.map((item) => item.id === editTarget.id ? mapDbSlot(data as unknown as DbAvailabilitySlot) : item));
+        setAddedNotice('Time slot updated successfully.');
+      } else {
+        const { data: ruleSlots, error } = await supabase.from('availability_slots').select('id,date').eq('rule_id',editTarget.id).gte('date',toISODate(new Date()));
+        if (error) throw new Error(error.message);
+        const upcoming = (ruleSlots ?? []) as {id:string;date:string}[];
+        const booked = await findBookedSlotIds(upcoming.map((row)=>row.id));
+        const editable = upcoming.filter((row)=>!booked.has(row.id));
+        const editableIds = new Set(editable.map((row)=>row.id));
+        const { data: otherSlots } = await supabase.from('availability_slots').select('id,date,start_time,end_time').eq('faculty_id',facultyId).gte('date',toISODate(new Date()));
+        const conflict = (otherSlots ?? []).some((row) => editableIds.has(row.id) ? false : editable.some((item)=>item.date===row.date && timeRangesOverlap(startMinutes,endMinutes,dbTimeToMinutes(row.start_time) ?? 0,dbTimeToMinutes(row.end_time) ?? 0)));
+        if (conflict) throw new Error('The new time overlaps another availability slot on at least one upcoming date.');
+        const { error: ruleError } = await supabase.from('recurring_rules').update({start_time:minutesToDbTime(startMinutes),end_time:minutesToDbTime(endMinutes),mode:values.mode,location:values.location.trim()}).eq('id',editTarget.id);
+        if (ruleError) throw new Error(ruleError.message);
+        for (let i=0;i<editable.length;i+=50) {
+          const { error: slotError } = await supabase.from('availability_slots').update({start_time:minutesToDbTime(startMinutes),end_time:minutesToDbTime(endMinutes),mode:values.mode,location:values.location.trim(),total_minutes:endMinutes-startMinutes}).in('id',editable.slice(i,i+50).map((row)=>row.id));
+          if (slotError) throw new Error(slotError.message);
+        }
+        loadSlotsRef.current?.();
+        setAddedNotice(booked.size ? `Weekly schedule updated. ${booked.size} booked slot(s) kept unchanged.` : 'Weekly schedule updated successfully.');
+      }
+      setEditTarget(null);
+    } catch (error) { setEditError(error instanceof Error ? error.message : 'Could not save the changes.'); }
+    finally { setSavingEdit(false); }
+  };
 
   const toggleSlot = async (id: string) => {
     const slot = slots.find((s) => s.id === id);
@@ -1769,6 +1898,41 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
             month: 'short',
             day: 'numeric',
           })}.`,
+    );
+  };
+
+  const renderEditModal = () => {
+    if (!editTarget) return null;
+    const initial = editTarget.initial;
+    return (
+      <div className="fv-edit-overlay" role="dialog" aria-modal="true">
+        <div className="fv-edit-modal">
+          <div className="fv-edit-modal-header">
+            <div><h3>{editTarget.kind === 'rule' ? 'Edit Weekly Schedule' : 'Edit Time Slot'}</h3><p>{editTarget.kind === 'rule' ? 'Changes apply to upcoming slots without booked appointments.' : 'Booked slots cannot be edited.'}</p></div>
+            <button type="button" onClick={() => setEditTarget(null)} aria-label="Close">×</button>
+          </div>
+          <div className="fv-add-slot-row">
+            <div className="fv-add-slot-field"><label>Start Time</label><input defaultValue={`${initial.startHour}:${initial.startMinute} ${initial.startPeriod}`} id="fv-edit-start" /></div>
+            <div className="fv-add-slot-field"><label>End Time</label><input defaultValue={`${initial.endHour}:${initial.endMinute} ${initial.endPeriod}`} id="fv-edit-end" /></div>
+          </div>
+          <div className="fv-add-slot-field fv-add-slot-field-wide"><label>Consultation Type</label><select id="fv-edit-mode" defaultValue={initial.mode}><option value="Face-to-Face">Face-to-Face</option><option value="Online">Online</option></select></div>
+          <div className="fv-add-slot-field fv-add-slot-field-wide"><label>Location / Meeting Link</label><input id="fv-edit-location" defaultValue={initial.location} /></div>
+          {editError && <p className="fv-slot-error">{editError}</p>}
+          <div className="fv-add-slot-actions">
+            <button type="button" className="fv-add-slot-cancel" onClick={() => setEditTarget(null)} disabled={savingEdit}>Cancel</button>
+            <button type="button" className="fv-add-slot-confirm" disabled={savingEdit} onClick={() => {
+              const start = (document.getElementById('fv-edit-start') as HTMLInputElement)?.value ?? '';
+              const end = (document.getElementById('fv-edit-end') as HTMLInputElement)?.value ?? '';
+              const mode = ((document.getElementById('fv-edit-mode') as HTMLSelectElement)?.value ?? initial.mode) as ConsultationMode;
+              const location = (document.getElementById('fv-edit-location') as HTMLInputElement)?.value ?? '';
+              const [sh, smp='00', sp='AM'] = start.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i)?.slice(1) ?? [];
+              const [eh, emp='00', ep='AM'] = end.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i)?.slice(1) ?? [];
+              if (!sh || !eh) { setEditError('Enter valid times such as 9:00 AM.'); return; }
+              void saveEdit({startHour:sh,startMinute:smp,startPeriod:sp.toUpperCase(),endHour:eh,endMinute:emp,endPeriod:ep.toUpperCase(),mode,location});
+            }}>{savingEdit ? 'Saving…' : 'Save Changes'}</button>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -1942,14 +2106,17 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
                     <p className="fv-recurring-range">{rule.dateRange}</p>
                   </div>
 
-                  <button
-                    type="button"
-                    aria-label="Delete schedule"
-                    className="fv-icon-danger"
-                    onClick={() => deleteRecurring(rule.id)}
-                  >
-                    <TrashIcon />
-                  </button>
+                  <div className="fv-recurring-actions">
+                    <button type="button" className="fv-edit-small" onClick={() => openRuleEdit(rule.id)}>Edit</button>
+                    <button
+                      type="button"
+                      aria-label="Delete schedule"
+                      className="fv-icon-danger"
+                      onClick={() => deleteRecurring(rule.id)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2171,6 +2338,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
               </div>
 
               <div className="fv-slot-actions">
+                <button type="button" className="fv-edit-small" onClick={() => openSlotEdit(slot.id)} disabled={!slot.enabled}>Edit</button>
                 <button
                   type="button"
                   className={`fv-toggle${
@@ -2208,6 +2376,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
         </button>
       </div>
       </div>
+      {renderEditModal()}
     </div>
   );
 }

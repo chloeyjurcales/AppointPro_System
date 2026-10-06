@@ -539,48 +539,6 @@
   color: var(--text-secondary, #6b7280);
 }
 
-/* ---------- Quick actions ---------- */
-
-.db-quick-actions {
-  background: var(--surface-card, #ffffff);
-  border: 1px solid var(--surface-border, #e5e7eb);
-  border-radius: var(--radius-lg, 14px);
-  padding: 20px 22px;
-  box-shadow: var(--shadow-xs, 0 1px 2px rgba(26, 15, 20, 0.05));
-}
-
-.db-quick-actions h2 {
-  margin: 0 0 16px;
-  font-size: 16px;
-  color: var(--text-primary, #1a1a1a);
-}
-
-.db-quick-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  gap: 12px;
-}
-
-.db-quick-action {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  border: none;
-  background: none;
-  font-family: inherit;
-  cursor: pointer;
-  padding: 10px 6px;
-  border-radius: var(--radius-md, 10px);
-  transition: background var(--duration-fast, 0.15s) var(--ease-standard, ease),
-    transform var(--duration-fast, 0.15s) var(--ease-standard, ease);
-}
-
-.db-quick-action:hover {
-  background: var(--surface-muted, #f7f5f6);
-  transform: translateY(-1px);
-}
-
 .db-toast {
   position: fixed;
   left: 50%;
@@ -619,23 +577,6 @@
   color: #ffffff;
 }
 
-.db-quick-action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-  flex-shrink: 0;
-}
-
-.db-quick-action span:last-child {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-primary, #1a1a1a);
-  text-align: center;
-}
 
 /* ---------- Right rail ---------- */
 
@@ -755,6 +696,73 @@
   line-height: 1.5;
 }
 
+.db-slotiq-card {
+  width: 100%;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-card, #ffffff);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(26, 15, 20, 0.05));
+  transition: transform var(--duration-fast, 0.15s) var(--ease-standard, ease),
+    box-shadow var(--duration-fast, 0.15s) var(--ease-standard, ease),
+    border-color var(--duration-fast, 0.15s) var(--ease-standard, ease);
+}
+
+.db-slotiq-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--brand-300, #e9c7ce);
+  box-shadow: 0 8px 20px rgba(26, 15, 20, 0.08);
+}
+
+.db-slotiq-card-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: var(--brand-500, #7a0e2c);
+}
+
+.db-slotiq-card-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.db-slotiq-card-content {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.db-slotiq-card-content strong {
+  font-size: 14px;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.db-slotiq-card-content span {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary, #6b7280);
+}
+
+.db-slotiq-card-arrow {
+  flex-shrink: 0;
+  color: var(--brand-500, #7a0e2c);
+  font-size: 18px;
+  font-weight: 700;
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 1080px) {
@@ -835,4 +843,42 @@
 .db-avatar-button:focus-visible {
   outline: 2px solid var(--brand-500, #7a0e2c);
   outline-offset: 3px;
+}
+
+/* Student profile shown in Today's Schedule */
+.db-schedule-student {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-schedule-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-100, #fbe3e9);
+  color: var(--brand-500, #7a0e2c);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.db-schedule-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.db-schedule-student .db-schedule-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

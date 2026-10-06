@@ -32,6 +32,7 @@ type ScheduleItem = {
   id: string;
   time: string;
   studentName: string;
+  studentAvatarUrl: string | null;
   type: string;
   status: 'Upcoming' | 'Completed' | 'Cancelled';
 };
@@ -85,7 +86,10 @@ type DbTodayAppointment = {
   purpose: string | null;
   status: string;
   students: {
-    profiles: { full_name: string } | { full_name: string }[] | null;
+    profiles:
+      | { full_name: string; avatar_url: string | null }
+      | { full_name: string; avatar_url: string | null }[]
+      | null;
   } | null;
 };
 
@@ -98,6 +102,7 @@ function mapDbTodayAppointment(row: DbTodayAppointment): ScheduleItem {
     id: row.id,
     time: `${formatClockTime(row.start_time)} – ${formatClockTime(row.end_time)}`,
     studentName: profile?.full_name ?? 'Unknown Student',
+    studentAvatarUrl: profile?.avatar_url ?? null,
     type: row.purpose ?? row.category ?? 'Consultation',
     status: STATUS_LABELS[row.status] ?? 'Upcoming',
   };
@@ -181,6 +186,8 @@ function mapDbNotification(row: DbNotification): Notification {
     sender: describeSender(row),
     senderName: senderRow?.full_name ?? undefined,
     senderAvatarUrl: senderRow?.avatar_url ?? undefined,
+    senderRole: senderRow?.role ? senderRow.role.charAt(0).toUpperCase() + senderRow.role.slice(1) : undefined,
+    senderDepartment: firstOf(senderRow?.students)?.department ?? firstOf(senderRow?.faculty)?.department ?? undefined,
     fullTime: new Date(row.created_at).toLocaleString('en-US', {
       month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
     }),
@@ -199,8 +206,11 @@ export default function Dashboard({
   onLogout,
 }: DashboardProps) {
   const user = session.user;
-  const fullName =
-    (user.user_metadata?.full_name as string | undefined) ?? user.email ?? '';
+  const metadataName =
+    (user.user_metadata?.full_name as string | undefined) ?? '';
+  const [profileName, setProfileName] = useState(metadataName);
+
+  const fullName = profileName.trim() || user.email || '';
 
   const firstAndLast = fullName
     .trim()
@@ -216,24 +226,60 @@ export default function Dashboard({
       .toUpperCase()
       .slice(0, 2) || 'U';
 
-  // The signed-in faculty member's profile photo (same profiles.avatar_url the
-  // mobile app uses). Falls back to the initials above when there is none.
+  // The signed-in faculty member's profile data is read from the same
+  // `profiles` row that the Personal Information screen updates. This keeps
+  // the sidebar, welcome heading, top-right avatar, initials, and any other
+  // dashboard details in sync immediately after a profile edit.
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-    supabase
-      .from('profiles')
-      .select('avatar_url')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (isMounted) setAvatarUrl((data?.avatar_url as string | null) ?? null);
-      });
+
+    const loadOwnProfile = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!isMounted) return;
+      if (error) {
+        console.log('Failed to load current faculty profile:', error.message);
+        return;
+      }
+
+      setProfileName((data?.full_name as string | null) ?? metadataName);
+      setAvatarUrl((data?.avatar_url as string | null) ?? null);
+    };
+
+    void loadOwnProfile();
+
+    const channel = supabase
+      .channel(`dashboard-own-profile-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as {
+            full_name?: string | null;
+            avatar_url?: string | null;
+          };
+          setProfileName(updated.full_name ?? '');
+          setAvatarUrl(updated.avatar_url ?? null);
+        },
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
     };
-  }, [user.id]);
+  }, [user.id, metadataName]);
 
   // SlotIQ: the Quick Action opens the modal; once a schedule is saved, the
   // result is shown in a short toast.
@@ -278,7 +324,7 @@ export default function Dashboard({
         .from('appointments')
         .select(
           `id, start_time, end_time, category, purpose, status,
-           students ( profiles ( full_name ) )`,
+           students ( profiles ( full_name, avatar_url ) )`,
         )
         .eq('faculty_id', facultyId)
         .eq('date', today)
@@ -489,7 +535,6 @@ export default function Dashboard({
     onNavigate?.(id);
   };
 
-  const openFaculty = (tab: FacultyTab) => handleNavClick('faculty', tab);
 
   const handleLogout = async () => {
     if (onLogout) {
@@ -679,8 +724,23 @@ export default function Dashboard({
                       {todaySchedule.map((item) => (
                         <li key={item.id} className="db-schedule-item">
                           <span className="db-schedule-time">{item.time}</span>
-                          <span className="db-schedule-name">
-                            {item.studentName}
+                          <span className="db-schedule-student">
+                            <span className="db-schedule-avatar" aria-hidden="true">
+                              {item.studentAvatarUrl ? (
+                                <img src={item.studentAvatarUrl} alt="" />
+                              ) : (
+                                item.studentName
+                                  .split(/\s+/)
+                                  .filter(Boolean)
+                                  .slice(0, 2)
+                                  .map((part) => part[0])
+                                  .join('')
+                                  .toUpperCase() || 'S'
+                              )}
+                            </span>
+                            <span className="db-schedule-name">
+                              {item.studentName}
+                            </span>
                           </span>
                           <span className="db-schedule-type">{item.type}</span>
                           <span
@@ -692,68 +752,6 @@ export default function Dashboard({
                       ))}
                     </ul>
                   )}
-                </section>
-
-                <section className="db-quick-actions">
-                  <h2>Quick Actions</h2>
-
-                  <div className="db-quick-actions-grid">
-                    <button
-                      type="button"
-                      className="db-quick-action"
-                      onClick={() => handleNavClick('appointments')}
-                    >
-                      <span
-                        className="db-quick-action-icon"
-                        style={{ background: '#5B7FDE' }}
-                      >
-                        <AppointmentsIcon />
-                      </span>
-                      <span>Appointments</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="db-quick-action"
-                      onClick={() => openFaculty('settings')}
-                    >
-                      <span
-                        className="db-quick-action-icon"
-                        style={{ background: '#3FB68A' }}
-                      >
-                        <CheckIcon />
-                      </span>
-                      <span>Availability</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="db-quick-action"
-                      onClick={() => handleNavClick('appointments')}
-                    >
-                      <span
-                        className="db-quick-action-icon"
-                        style={{ background: '#F0C93A' }}
-                      >
-                        <QueueIcon />
-                      </span>
-                      <span>Queue</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="db-quick-action"
-                      onClick={() => setSlotIqOpen(true)}
-                    >
-                      <span
-                        className="db-quick-action-icon"
-                        style={{ background: 'var(--brand-500, #7a0e2c)' }}
-                      >
-                        <SparkleIcon />
-                      </span>
-                      <span>SlotIQ</span>
-                    </button>
-                  </div>
                 </section>
 
                 {slotIqNotice && (
@@ -781,6 +779,23 @@ export default function Dashboard({
                   <QuoteIcon />
                   <p>&ldquo;{QUOTE}&rdquo;</p>
                 </div>
+
+                <button
+                  type="button"
+                  className="db-slotiq-card"
+                  onClick={() => setSlotIqOpen(true)}
+                >
+                  <span className="db-slotiq-card-icon">
+                    <SparkleIcon />
+                  </span>
+                  <span className="db-slotiq-card-content">
+                    <strong>SlotIQ</strong>
+                    <span>Find the best time slots for your students.</span>
+                  </span>
+                  <span className="db-slotiq-card-arrow" aria-hidden="true">
+                    &rarr;
+                  </span>
+                </button>
               </div>
             </>
           )}
@@ -801,6 +816,7 @@ export default function Dashboard({
                 initialTab={facultyInitialTab}
                 searchQuery={facultySearch}
                 onAvatarChange={setAvatarUrl}
+                onProfileNameChange={setProfileName}
               />
             </div>
           )}
@@ -1140,26 +1156,7 @@ function ClockIcon() {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path
-        d="m8 12.5 2.5 2.5L16 9"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+
 
 function QueueIcon() {
   return (

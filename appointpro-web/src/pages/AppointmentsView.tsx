@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import {
-  approvedMessage,
   canceledMessage,
   declinedMessage,
   formatWhen,
@@ -54,6 +53,16 @@ type ModalState =
   | { type: 'reschedule'; appointment: Appointment }
   | { type: 'details'; appointment: Appointment };
 
+type ActionSuccess = {
+  type: 'approved' | 'cancelled' | 'rescheduled';
+  appointment: Appointment;
+  date?: string;
+  time?: string;
+  location?: string;
+  mode?: MeetingMode;
+  reason?: string;
+};
+
 type QueueGroup = {
   blockKey: string;
   blockStart: Date;
@@ -67,6 +76,13 @@ function pad2(value: number): string {
 
 function addMinutes(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60000);
+}
+
+function dbTimeToMinutes(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parts = value.split(':').map(Number);
+  if (parts.length < 2 || parts.some((part) => Number.isNaN(part))) return null;
+  return parts[0] * 60 + parts[1];
 }
 
 // "2:30 PM" from a real Date, for the live-queue/reminder copy.
@@ -369,6 +385,7 @@ export default function AppointmentsView({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   // True while a cancel is waiting on the database (disables the buttons).
   const [actionBusy, setActionBusy] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState<ActionSuccess | null>(null);
 
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleStart, setRescheduleStart] = useState('');
@@ -548,86 +565,6 @@ export default function AppointmentsView({
     setModal({ type: 'details', appointment });
   };
 
-  const openCancel = (appointment: Appointment) => {
-    setCancelReason('');
-    setModal({ type: 'cancel', appointment });
-  };
-
-  const openReschedule = (appointment: Appointment) => {
-    setRescheduleDate('');
-    setRescheduleStart('');
-    setRescheduleEnd('');
-    setRescheduleReason('');
-    setRescheduleMode(appointment.mode);
-    setRescheduleMeetingLink('');
-    // For an online appointment `location` holds the meeting link, which is
-    // not a room — don't carry it over as the face-to-face location.
-    setRescheduleLocation(appointment.mode === 'Face-to-Face' ? appointment.location : '');
-    setModal({ type: 'reschedule', appointment });
-  };
-
-  const openDecline = (appointment: Appointment) => {
-    setDeclineReason('');
-    setModal({ type: 'decline', appointment });
-  };
-
-  // Approve a pending request. The update is guarded on
-  // `faculty_approval_status = 'pending'` so a request that was already
-  // answered (e.g. from the mobile app) is never overwritten, and the UI
-  // only changes once the database confirms it.
-  const approveAppointment = async (appt: Appointment) => {
-    if (actionInFlightRef.current || !isPendingApproval(appt)) return;
-    actionInFlightRef.current = true;
-    try {
-      const { data, error } = await supabase
-        .from('appointments')
-        .update({
-          student_approval_status: 'approved',
-          faculty_approval_status: 'approved',
-          status: 'upcoming',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', appt.id)
-        .eq('faculty_id', facultyId)
-        .eq('faculty_approval_status', 'pending')
-        .select('id')
-        .maybeSingle();
-
-      if (error) {
-        window.alert('Could not approve appointment: ' + error.message);
-        return;
-      }
-      if (!data) {
-        window.alert('This appointment was already processed or is no longer available.');
-        return;
-      }
-
-      // Now eligible for the live queue — start from a clean queue row.
-      await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
-
-      setAppointments((prev) =>
-        prev.map((a) =>
-          a.id === appt.id ? { ...a, approvalStatus: 'approved', approved: true } : a,
-        ),
-      );
-      setActionNotice(`${appt.studentName}'s appointment was approved.`);
-
-      if (appt.studentUserId) {
-        await supabase.from('notifications').insert({
-          user_id: appt.studentUserId,
-          sender_id: facultyId,
-          ...approvedMessage(
-            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
-            { purpose: appt.purpose, category: appt.category },
-            formatWhen({ dateLabel: appt.date, timeLabel: appt.time }),
-          ),
-        });
-      }
-    } finally {
-      actionInFlightRef.current = false;
-    }
-  };
-
   const confirmDecline = async () => {
     if (modal.type !== 'decline' || actionInFlightRef.current) return;
     const appt = modal.appointment;
@@ -757,6 +694,7 @@ export default function AppointmentsView({
         });
         if (notifyError) console.log('Failed to notify student:', notifyError.message);
       }
+      setActionSuccess({ type: 'cancelled', appointment: { ...appt, status: 'Cancelled' }, reason });
     } finally {
       actionInFlightRef.current = false;
       setActionBusy(false);
@@ -769,113 +707,184 @@ export default function AppointmentsView({
     !!rescheduleStart &&
     !!rescheduleEnd &&
     rescheduleEnd > rescheduleStart &&
-    rescheduleReason.trim().length > 0 &&
-    (rescheduleMode !== 'Online' || rescheduleMeetingLink.trim().length > 0) &&
-    (rescheduleMode !== 'Face-to-Face' || rescheduleLocation.trim().length > 0);
+    rescheduleReason.trim().length > 0;
 
-  const confirmReschedule = () => {
-    if (modal.type !== 'reschedule' || !canConfirmReschedule) return;
-
-    const { id, studentUserId } = modal.appointment;
-    const newDate = formatDateLabel(rescheduleDate);
-    const newTime = `${formatTimeLabel(rescheduleStart)} - ${formatTimeLabel(
-      rescheduleEnd,
-    )}`;
-    const newStartsAt = combineDateAndTime(rescheduleDate, rescheduleStart);
-    const newEndsAt = combineDateAndTime(rescheduleDate, rescheduleEnd);
-    const newLocation =
-      rescheduleMode === 'Online'
-        ? rescheduleMeetingLink.trim()
-        : rescheduleLocation.trim();
-    const reason = rescheduleReason.trim();
-
-    // The stored duration used to keep its OLD value even when the new
-    // start/end changed the length of the appointment.
+  const fetchRescheduleValidation = async (appt: Appointment) => {
     const durationMinutes = Math.round(
-      (newEndsAt.getTime() - newStartsAt.getTime()) / 60000,
+      (combineDateAndTime(rescheduleDate, rescheduleEnd).getTime() -
+        combineDateAndTime(rescheduleDate, rescheduleStart).getTime()) /
+        60000,
     );
-    if (durationMinutes <= 0) {
-      window.alert('End time must be after the start time.');
-      return;
+    const newStart = combineDateAndTime(rescheduleDate, rescheduleStart);
+    const newEnd = combineDateAndTime(rescheduleDate, rescheduleEnd);
+    if (durationMinutes <= 0) throw new Error('End time must be after the start time.');
+    if (newStart.getTime() < Date.now()) throw new Error('Please choose a time in the future.');
+
+    const { data: slots, error: slotsError } = await supabase
+      .from('availability_slots')
+      .select('id,start_time,end_time,mode,location,enabled')
+      .eq('faculty_id', facultyId)
+      .eq('date', rescheduleDate)
+      .eq('enabled', true)
+      .order('start_time', { ascending: true });
+    if (slotsError) throw new Error(`Could not check faculty availability: ${slotsError.message}`);
+
+    const startMinutes = newStart.getHours() * 60 + newStart.getMinutes();
+    const endMinutes = newEnd.getHours() * 60 + newEnd.getMinutes();
+    const matchingSlot = (slots ?? []).find((slot) => {
+      const slotStart = dbTimeToMinutes(slot.start_time) ?? -1;
+      const slotEnd = dbTimeToMinutes(slot.end_time) ?? -1;
+      return slotStart <= startMinutes && slotEnd >= endMinutes;
+    });
+    if (!matchingSlot) {
+      throw new Error('That date and time is outside your available consultation schedule. Choose a time inside one of your enabled availability slots.');
     }
-    if (newStartsAt.getTime() < Date.now()) {
-      window.alert('Please choose a time in the future.');
-      return;
+
+    const slotMode = matchingSlot.mode as MeetingMode;
+    if (slotMode !== rescheduleMode) {
+      throw new Error(`That availability slot is ${slotMode}. Choose a time slot that matches the selected meeting mode.`);
     }
+
+    const { data: classRows, error: classError } = await supabase
+      .from('student_class_schedule')
+      .select('id,day_of_week,start_time,end_time,subject')
+      .eq('student_id', appt.studentUserId ?? '');
+    if (classError) throw new Error(`Could not check the student's class schedule: ${classError.message}`);
+
+    const dayOfWeek = newStart.getDay();
+    const conflict = (classRows ?? []).find((row) => {
+      if (row.day_of_week !== dayOfWeek) return false;
+      const classStart = dbTimeToMinutes(row.start_time) ?? 0;
+      const classEnd = dbTimeToMinutes(row.end_time) ?? 0;
+      return startMinutes < classEnd && classStart < endMinutes;
+    });
+    if (conflict) {
+      const classStart = formatDbTime(conflict.start_time);
+      const classEnd = formatDbTime(conflict.end_time);
+      throw new Error(`The student has ${conflict.subject} on ${newStart.toLocaleDateString('en-US', { weekday: 'long' })} from ${classStart} to ${classEnd}. Rescheduling to this time is unavailable.`);
+    }
+
     const clash = appointments.find(
       (a) =>
-        a.id !== id &&
+        a.id !== appt.id &&
         a.status === 'Upcoming' &&
-        a.startsAt < newEndsAt &&
-        addMinutes(a.startsAt, a.durationMinutes) > newStartsAt,
+        a.startsAt < newEnd &&
+        addMinutes(a.startsAt, a.durationMinutes) > newStart,
     );
-    if (clash) {
-      window.alert(`That time overlaps ${clash.studentName}'s appointment.`);
-      return;
-    }
+    if (clash) throw new Error(`That time overlaps ${clash.studentName}'s appointment.`);
 
-    setAppointments((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              date: newDate,
-              time: newTime,
-              startsAt: newStartsAt,
-              mode: rescheduleMode,
-              location: newLocation,
-              // Rescheduling moves the student out of their old shared
-              // block into a standalone slot of their own.
-              blockStart: newStartsAt,
-              blockEnd: addMinutes(newStartsAt, durationMinutes),
-            }
-          : a,
-      ),
-    );
-    closeModal();
+    return {
+      durationMinutes,
+      newStart,
+      newEnd,
+      location: matchingSlot.location,
+      mode: slotMode,
+    };
+  };
 
-    supabase
-      .from('appointments')
-      .update({
-        date: rescheduleDate,
-        start_time: `${rescheduleStart}:00`,
-        end_time: `${rescheduleEnd}:00`,
-        duration_minutes: durationMinutes,
-        mode: rescheduleMode,
+  const confirmReschedule = async () => {
+    if (modal.type !== 'reschedule' || !canConfirmReschedule || actionInFlightRef.current) return;
+    const appt = modal.appointment;
+    const reason = rescheduleReason.trim();
+    actionInFlightRef.current = true;
+    setActionBusy(true);
+    try {
+      const validation = await fetchRescheduleValidation(appt);
+      const { durationMinutes, newStart, newEnd, location, mode } = validation;
+      const newDateLabel = formatDateLabel(rescheduleDate);
+      const newTimeLabel = `${formatTimeLabel(rescheduleStart)} - ${formatTimeLabel(rescheduleEnd)}`;
+      const newLocation = location;
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          date: rescheduleDate,
+          start_time: `${rescheduleStart}:00`,
+          end_time: `${rescheduleEnd}:00`,
+          duration_minutes: durationMinutes,
+          mode,
+          location: newLocation,
+          meeting_link: mode === 'Online' ? newLocation : null,
+          updated_at: new Date().toISOString(),
+          slot_id: null,
+        })
+        .eq('id', appt.id)
+        .eq('faculty_id', facultyId)
+        .select('id')
+        .maybeSingle();
+      if (error) throw new Error(`Could not reschedule appointment: ${error.message}`);
+      if (!data) throw new Error('This appointment was already changed or is no longer available.');
+
+      await supabase.from('slot_bookings').delete().eq('appointment_id', appt.id);
+      await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
+
+      if (appt.studentUserId) {
+        const { error: notifyError } = await supabase.from('notifications').insert({
+          user_id: appt.studentUserId,
+          sender_id: facultyId,
+          ...rescheduledMessage(
+            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+            { purpose: appt.reason },
+            formatWhen({ dateLabel: newDateLabel, timeLabel: newTimeLabel }),
+            { reason, meetingLink: mode === 'Online' ? newLocation : undefined },
+          ),
+        });
+        if (notifyError) console.log('Failed to notify student:', notifyError.message);
+      }
+
+      const updatedAppointment: Appointment = {
+        ...appt,
+        date: newDateLabel,
+        time: newTimeLabel,
+        startsAt: newStart,
+        durationMinutes,
+        mode,
         location: newLocation,
-        meeting_link: rescheduleMode === 'Online' ? newLocation : null,
-        updated_at: new Date().toISOString(),
-        // No longer tied to its original shared slot — it's now a
-        // standalone time this faculty member picked directly.
-        slot_id: null,
-      })
-      .eq('id', id)
-      .then(({ error }) => {
-        if (error) window.alert('Could not reschedule appointment: ' + error.message);
-      });
-
-    supabase.from('slot_bookings').delete().eq('appointment_id', id);
-    supabase.from('queue_entries').delete().eq('appointment_id', id);
-
-    if (studentUserId) {
-      supabase.from('notifications').insert({
-        user_id: studentUserId,
-        sender_id: facultyId,
-        ...rescheduledMessage(
-          { name: facultyName, department: facultyDepartment, role: 'Faculty' },
-          { purpose: modal.appointment.reason },
-          formatWhen({ dateLabel: newDate, timeLabel: newTime }),
-          {
-            reason,
-            meetingLink: rescheduleMode === 'Online' ? rescheduleMeetingLink : undefined,
-          },
-        ),
-      });
+        blockStart: newStart,
+        blockEnd: newEnd,
+      };
+      setAppointments((prev) => prev.map((item) => item.id === appt.id ? updatedAppointment : item));
+      closeModal();
+      setActionSuccess({ type: 'rescheduled', appointment: updatedAppointment, date: newDateLabel, time: newTimeLabel, location: newLocation, mode, reason });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not reschedule appointment.');
+    } finally {
+      actionInFlightRef.current = false;
+      setActionBusy(false);
     }
   };
 
   return (
     <div className="av-page">
+      {actionSuccess && (
+        <div className="av-success-overlay" role="dialog" aria-modal="true">
+          <div className="av-success-modal">
+            <button type="button" className="av-success-close" onClick={() => setActionSuccess(null)} aria-label="Close">×</button>
+            <div className={`av-success-icon av-success-${actionSuccess.type}`}>
+              {actionSuccess.type === 'cancelled' ? '×' : '✓'}
+            </div>
+            <h2>{actionSuccess.type === 'cancelled' ? 'Appointment Canceled!' : actionSuccess.type === 'rescheduled' ? 'Appointment Rescheduled!' : 'Appointment Approved!'}</h2>
+            <p className="av-success-subtitle">
+              {actionSuccess.type === 'cancelled' ? 'The appointment has been successfully canceled.' : actionSuccess.type === 'rescheduled' ? 'The appointment has been successfully rescheduled.' : 'The appointment has been successfully approved.'}
+            </p>
+            <div className="av-success-details">
+              <strong>{actionSuccess.appointment.studentName}</strong>
+              <span>{actionSuccess.appointment.category ?? actionSuccess.appointment.reason}</span>
+              <div className="av-success-detail-row"><span>📅</span><span>{actionSuccess.date ?? actionSuccess.appointment.date}</span></div>
+              <div className="av-success-detail-row"><span>🕒</span><span>{actionSuccess.time ?? actionSuccess.appointment.time}</span></div>
+              <div className="av-success-detail-row"><span>📍</span><span>{actionSuccess.location ?? actionSuccess.appointment.location}</span></div>
+              <div className="av-success-detail-row"><span>👥</span><span>{actionSuccess.mode ?? actionSuccess.appointment.mode}</span></div>
+              {actionSuccess.reason && <><div className="av-success-divider" /><strong className="av-success-label">Reason</strong><span>{actionSuccess.reason}</span></>}
+              <div className="av-success-divider" />
+              <strong className="av-success-label">Reference No.</strong>
+              <strong>{actionSuccess.appointment.referenceNo}</strong>
+            </div>
+            <div className="av-success-notice">🔔 {actionSuccess.appointment.studentName} has been notified of this {actionSuccess.type === 'cancelled' ? 'cancellation' : actionSuccess.type === 'rescheduled' ? 'change' : 'approval'}.</div>
+            <button type="button" className="av-success-back" onClick={() => setActionSuccess(null)}>Back to Appointments</button>
+          </div>
+        </div>
+      )}
+
       <div className="av-header">
         <div>
           <h1>Appointments</h1>
@@ -1055,7 +1064,6 @@ export default function AppointmentsView({
               <th>Student</th>
               <th>Reason</th>
               <th>Status</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1108,54 +1116,13 @@ export default function AppointmentsView({
                     {isPendingApproval(appt) ? 'Pending' : appt.status}
                   </span>
                 </td>
-                <td>
-                  {isPendingApproval(appt) ? (
-                    <div className="av-actions">
-                      <button
-                        type="button"
-                        className="av-row-btn av-row-btn-approve"
-                        onClick={() => approveAppointment(appt)}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="av-row-btn av-row-btn-danger"
-                        onClick={() => openDecline(appt)}
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  ) : appt.status === 'Upcoming' ? (
-                    <div className="av-actions">
-                      <button
-                        type="button"
-                        className="av-row-btn"
-                        onClick={() => openReschedule(appt)}
-                      >
-                        Reschedule
-                      </button>
-                      <button
-                        type="button"
-                        className="av-row-btn av-row-btn-danger"
-                        onClick={() => openCancel(appt)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="av-actions">
-                      <span className="av-actions-muted">—</span>
-                    </div>
-                  )}
-                </td>
               </tr>
               );
             })}
 
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="av-empty">
+                <td colSpan={4} className="av-empty">
                   <div className="av-empty-inner">
                     <span className="av-empty-icon" aria-hidden="true">
                       <CalendarEmptyIcon />

@@ -1356,3 +1356,151 @@
     gap: 4px;
   }
 }
+
+/* ---------- Schedule navigation ---------- */
+.fv-schedule-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fv-schedule-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fv-schedule-nav button {
+  min-width: 34px;
+  height: 34px;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-primary, #1a1a1a);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.fv-schedule-nav button:hover {
+  border-color: var(--brand-500, #7a0e2c);
+  color: var(--brand-500, #7a0e2c);
+}
+
+.fv-schedule-nav .fv-schedule-today {
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fv-schedule-week-label {
+  margin: -8px 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+}
+
+/* ---------- Availability edit controls ---------- */
+.fv-slot-actions,
+.fv-recurring-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fv-edit-small {
+  border: 1px solid var(--surface-border, #e5e7eb);
+  background: #fff;
+  color: var(--brand-500, #7a0e2c);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fv-edit-small:hover:not(:disabled) {
+  background: var(--brand-50, #fdf1f4);
+  border-color: var(--brand-500, #7a0e2c);
+}
+
+.fv-edit-small:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* ---------- Availability edit modal ---------- */
+.fv-edit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 12, 16, .42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.fv-edit-modal {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  box-shadow: 0 20px 60px rgba(30, 15, 22, .22);
+  padding: 22px;
+}
+
+.fv-edit-modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.fv-edit-modal-header h3 {
+  margin: 0 0 5px;
+  font-size: 16px;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.fv-edit-modal-header p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #6b7280);
+}
+
+.fv-edit-modal-header > button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: 50%;
+  background: #fff;
+  color: #6b7280;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .fv-schedule-header {
+    flex-direction: column;
+  }
+
+  .fv-schedule-nav {
+    align-self: stretch;
+  }
+
+  .fv-schedule-nav .fv-schedule-today {
+    flex: 1;
+  }
+
+  .fv-edit-modal {
+    padding: 18px;
+  }
+}

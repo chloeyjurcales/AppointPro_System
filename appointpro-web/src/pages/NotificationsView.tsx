@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import './NotificationsView.css';
 
 export type NotificationType =
@@ -17,6 +17,8 @@ export type Notification = {
   // Sender's name and profile picture; when set, shown instead of the type icon.
   senderName?: string;
   senderAvatarUrl?: string;
+  senderRole?: string;
+  senderDepartment?: string;
   // Full date and time for the hover tooltip.
   fullTime?: string;
   time: string;
@@ -44,6 +46,7 @@ export default function NotificationsView({
 
   // IDs of selected notifications
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [openNotification, setOpenNotification] = useState<Notification | null>(null);
 
   const allSelected =
     notifications.length > 0 &&
@@ -96,6 +99,17 @@ export default function NotificationsView({
   // Mark all as read — updates every unread row for this faculty member.
   const markAllAsRead = () => {
     onMarkAllRead();
+  };
+
+  const handleNotificationOpen = (notification: Notification) => {
+    if (selectionMode) {
+      toggleNotification(notification.id);
+      return;
+    }
+    setOpenNotification(notification);
+    if (notification.unread) {
+      onMarkSelectedRead([notification.id]);
+    }
   };
 
   // Mark selected notifications as read.
@@ -232,6 +246,15 @@ export default function NotificationsView({
             notifications.map((notification) => (
               <article
                 key={notification.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleNotificationOpen(notification)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleNotificationOpen(notification);
+                  }
+                }}
                 className={`nv-notification${
                   notification.unread
                     ? ' nv-notification-unread'
@@ -251,9 +274,8 @@ export default function NotificationsView({
                       checked={selectedIds.includes(
                         notification.id
                       )}
-                      onChange={() =>
-                        toggleNotification(notification.id)
-                      }
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleNotification(notification.id)}
                       aria-label={`Select ${notification.title}`}
                     />
                   </div>
@@ -303,9 +325,121 @@ export default function NotificationsView({
 
         </div>
       </div>
+
+      <NotificationDetailModal
+        notification={openNotification}
+        onClose={() => setOpenNotification(null)}
+      />
     </section>
   );
 }
+
+type NotificationDetailModalProps = {
+  notification: Notification | null;
+  onClose: () => void;
+};
+
+function extractDetail(description: string, label: 'purpose' | 'reason' | 'when'): string | null {
+  const text = description.trim();
+  if (!text) return null;
+
+  if (label === 'purpose') {
+    const match = text.match(/(?:for|about) (.+?) on (?:[A-Z][a-z]{2}\s+\d{1,2},?\s+\d{4}|\w+\s+\d{1,2}[^.]*)/i);
+    if (match?.[1]) return match[1].replace(/[.]+$/, '').trim();
+    const generic = text.match(/booked an appointment for (.+?)(?:\s+on |\.)/i);
+    return generic?.[1]?.trim() || null;
+  }
+
+  if (label === 'reason') {
+    const match = text.match(/reason:\s*(.+)$/i);
+    return match?.[1]?.trim() || null;
+  }
+
+  const match = text.match(/(?:on|to) ((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^.]*)\.?$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function NotificationDetailModal({ notification, onClose }: NotificationDetailModalProps) {
+  const details = useMemo(() => {
+    if (!notification) {
+      return { purpose: null, reason: null, when: null };
+    }
+
+    const purpose = extractDetail(notification.message, 'purpose');
+    const reason = extractDetail(notification.message, 'reason');
+    const when = extractDetail(notification.message, 'when');
+    return { purpose, reason, when };
+  }, [notification]);
+
+  if (!notification) return null;
+
+  const initials = (notification.senderName || 'AppointPro')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part, index, parts) => index === 0 || index === parts.length - 1 ? part[0] : '')
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+
+  return (
+    <div className="nv-modal-backdrop" onMouseDown={onClose}>
+      <div
+        className="nv-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notification-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="nv-detail-header">
+          <div className="nv-detail-person">
+            {notification.senderAvatarUrl ? (
+              <img src={notification.senderAvatarUrl} alt={notification.senderName || 'Profile'} className="nv-detail-avatar" />
+            ) : (
+              <div className="nv-detail-avatar nv-detail-avatar-fallback">{initials}</div>
+            )}
+            <div>
+              <div className="nv-detail-eyebrow">Person involved</div>
+              <div className="nv-detail-person-name">{notification.senderName || 'AppointPro'}</div>
+              {(notification.senderRole || notification.senderDepartment) && (
+                <div className="nv-detail-person-meta">
+                  {[notification.senderRole, notification.senderDepartment].filter(Boolean).join(' · ')}
+                </div>
+              )}
+            </div>
+          </div>
+          <button type="button" className="nv-detail-close" onClick={onClose} aria-label="Close notification details">×</button>
+        </div>
+
+        <div className="nv-detail-title-row">
+          <div className="nv-detail-icon"><NotificationIcon type={notification.type} /></div>
+          <div>
+            <div className="nv-detail-eyebrow">Activity</div>
+            <h2 id="notification-detail-title">{notification.title}</h2>
+          </div>
+        </div>
+
+        <div className="nv-detail-grid">
+          {details.purpose && (
+            <div className="nv-detail-field"><span>Purpose</span><strong>{details.purpose}</strong></div>
+          )}
+          {details.when && (
+            <div className="nv-detail-field"><span>Appointment / schedule</span><strong>{details.when}</strong></div>
+          )}
+          {details.reason && (
+            <div className="nv-detail-field nv-detail-field-wide"><span>Why / Reason</span><strong>{details.reason}</strong></div>
+          )}
+          <div className="nv-detail-field nv-detail-field-wide"><span>What happened</span><strong>{notification.message || 'No additional details were included.'}</strong></div>
+          <div className="nv-detail-field"><span>Received</span><strong>{notification.fullTime || notification.time}</strong></div>
+          <div className="nv-detail-field"><span>Status</span><strong>{notification.unread ? 'Unread' : 'Read'}</strong></div>
+        </div>
+
+        <button type="button" className="nv-detail-done" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+
 
 function NotificationIcon({
   type,
