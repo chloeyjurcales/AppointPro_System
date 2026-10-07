@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -78,7 +79,16 @@ export default function DeclineReasonModal({
                 <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
                   <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.declineButton} onPress={() => onConfirm(reason.trim())}>
+                <TouchableOpacity style={styles.declineButton} onPress={() =>
+                  Alert.alert(
+                    'Decline this request?',
+                    'The student will be told it was declined. This cannot be undone.',
+                    [
+                      { text: 'Go Back', style: 'cancel' },
+                      { text: 'Yes, Decline', style: 'destructive', onPress: () => onConfirm(reason.trim()) },
+                    ]
+                  )
+                }>
                   <Text style={styles.declineText}>Decline Appointment</Text>
                 </TouchableOpacity>
               </View>

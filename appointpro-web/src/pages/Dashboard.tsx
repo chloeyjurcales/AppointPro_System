@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { supabase } from '../lib/supabase';
 import { useQueueEngine } from '../lib/useQueueEngine';
+import { useConfirm } from '../lib/useConfirm';
 import type { Session } from '@supabase/supabase-js';
 import AppointmentsView from './AppointmentsView';
 import FacultyView, { type FacultyTab } from './FacultyView';
@@ -318,6 +319,8 @@ export default function Dashboard({
   // Keeps today's queue running (joins, auto-start, reminders) on every page.
   useQueueEngine(facultyId, firstAndLast || user.email || 'Faculty');
 
+  const { confirm, dialog: confirmDialog } = useConfirm();
+
   // Loads today's real appointments for this faculty member (backs both
   // the "Today's Schedule" list and the Appointments stat), then keeps
   // it live via Realtime so a new booking/cancellation shows up without
@@ -596,7 +599,15 @@ export default function Dashboard({
           <button
             type="button"
             className="db-sidebar-profile"
-            onClick={handleLogout}
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Log out?',
+                message: 'Are you sure you want to log out of your AppointPro account?',
+                confirmLabel: 'Yes, Log Out',
+                danger: true,
+              });
+              if (ok) void handleLogout();
+            }}
             title="Log out"
           >
             <span className="db-sidebar-avatar">
@@ -848,6 +859,8 @@ export default function Dashboard({
           }}
         />
       )}
+
+      {confirmDialog}
     </div>
   );
 }

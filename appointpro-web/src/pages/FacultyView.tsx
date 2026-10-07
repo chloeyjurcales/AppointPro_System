@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import './FacultyView.css';
+import { useConfirm } from '../lib/useConfirm';
 
 
 export type FacultyTab = 'profile' | 'schedule' | 'settings' | 'directory';
@@ -682,6 +683,7 @@ function ProfileTab({
   onProfileNameChange?: (name: string) => void;
 }) {
   const facultyId = session.user.id;
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [loading, setLoading] = useState(true);
   const [facultyCode, setFacultyCode] = useState('');
@@ -792,7 +794,14 @@ function ProfileTab({
     if (error) window.alert(`Could not save your new photo: ${error.message}`);
   };
 
-  const removeAvatar = () => {
+  const removeAvatar = async () => {
+    const ok = await confirm({
+      title: 'Remove your profile photo?',
+      message: 'Your initials will be shown instead.',
+      confirmLabel: 'Yes, Remove',
+      danger: true,
+    });
+    if (!ok) return;
     setAvatarUrl(null);
     onAvatarChange?.(null);
     supabase
@@ -1093,6 +1102,8 @@ function ProfileTab({
           <span>{savedInfo.department || 'No department set'}</span>
         </div>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }
@@ -1344,6 +1355,7 @@ function mapDbSlot(row: DbAvailabilitySlot): TimeSlot {
 }
 
 function AvailabilityTab({ facultyId }: { facultyId: string }) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [recurring, setRecurring] = useState<RecurringSchedule[]>([]);
   const [loadingRecurring, setLoadingRecurring] = useState(true);
   const [showRecurringForm, setShowRecurringForm] = useState(false);
@@ -1572,6 +1584,13 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
   };
 
   const deleteRecurring = async (id: string) => {
+    const ok = await confirm({
+      title: 'Delete this weekly schedule?',
+      message: 'Its future time slots without bookings will be removed. Slots that already have appointments are kept as one-time slots.',
+      confirmLabel: 'Yes, Delete',
+      danger: true,
+    });
+    if (!ok) return;
     // Slots that ever had an appointment can't be deleted (foreign key). Delete
     // every slot that can be, and detach only the rest so they stay as
     // one-time slots. (This used to detach ALL of the rule's slots as soon as
@@ -1812,6 +1831,13 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
   };
 
   const deleteSlot = async (id: string) => {
+    const ok = await confirm({
+      title: 'Delete this time slot?',
+      message: 'Students will no longer be able to book it.',
+      confirmLabel: 'Yes, Delete',
+      danger: true,
+    });
+    if (!ok) return;
     const previous = slots;
     setSlots((prev) => prev.filter((s) => s.id !== id));
 
@@ -2399,6 +2425,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
       </div>
       </div>
       {renderEditModal()}
+      {confirmDialog}
     </div>
   );
 }

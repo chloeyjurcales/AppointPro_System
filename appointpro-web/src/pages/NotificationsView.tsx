@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useConfirm } from '../lib/useConfirm';
 import './NotificationsView.css';
 
 export type NotificationType =
@@ -41,6 +42,8 @@ export default function NotificationsView({
   onMarkSelectedRead,
   onDeleteSelected,
 }: NotificationsViewProps) {
+  const { confirm, dialog: confirmDialog } = useConfirm();
+
   // Selection mode is OFF by default
   const [selectionMode, setSelectionMode] = useState(false);
 
@@ -89,8 +92,15 @@ export default function NotificationsView({
   };
 
   // Delete selected notifications — actually deletes the rows in Supabase.
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (selectedIds.length === 0) return;
+    const ok = await confirm({
+      title: selectedIds.length === 1 ? 'Delete this notification?' : `Delete ${selectedIds.length} notifications?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Yes, Delete',
+      danger: true,
+    });
+    if (!ok) return;
     onDeleteSelected(selectedIds);
     setSelectedIds([]);
     setSelectionMode(false);
@@ -330,6 +340,8 @@ export default function NotificationsView({
         notification={openNotification}
         onClose={() => setOpenNotification(null)}
       />
+
+      {confirmDialog}
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -68,6 +69,18 @@ export default function CancelReasonModal({
         setError(result.message || 'Please share a genuine reason for cancelling.');
         return;
       }
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Cancel this appointment?',
+          'This cannot be undone. Are you sure you want to cancel?',
+          [
+            { text: 'Keep Appointment', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Yes, Cancel It', style: 'destructive', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) }
+        );
+      });
+      if (!confirmed) return;
       await onConfirm(text);
     } finally {
       setChecking(false);

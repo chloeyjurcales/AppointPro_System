@@ -8,6 +8,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -82,7 +83,17 @@ export default function FacultyCancelAppointmentScreen({
         <View style={styles.footer}>
           <TouchableOpacity
             style={[styles.cancelButton, !canCancel && styles.cancelButtonDisabled]}
-            onPress={() => canCancel && onConfirmCancel?.(reason.trim())}
+            onPress={() =>
+              canCancel &&
+              Alert.alert(
+                'Cancel this appointment?',
+                'The student will be notified. This cannot be undone.',
+                [
+                  { text: 'Keep Appointment', style: 'cancel' },
+                  { text: 'Yes, Cancel It', style: 'destructive', onPress: () => onConfirmCancel?.(reason.trim()) },
+                ]
+              )
+            }
             disabled={!canCancel}
             activeOpacity={0.85}
           >

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { useConfirm } from '../lib/useConfirm';
 import './QueueView.css';
 
 type QueueViewProps = {
@@ -220,6 +221,7 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only filled in while the queue is empty, to tell "nobody yet" from "all done".
@@ -356,6 +358,12 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
 
   const handleCompleteCurrent = async () => {
     if (!current || busy || !currentStarted) return;
+    const ok = await confirm({
+      title: `Mark ${current.studentName} as done?`,
+      message: 'Their appointment will be moved to Completed and they will be removed from the queue.',
+      confirmLabel: 'Yes, Mark as Done',
+    });
+    if (!ok) return;
     setBusy(true);
     setNotice(null);
 
@@ -422,13 +430,13 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
 
   const handleSkipCurrent = async () => {
     if (!current || busy || !canSkip) return;
-    if (
-      !window.confirm(
-        `Mark ${current.studentName} as a no-show? Their appointment will be cancelled.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Mark ${current.studentName} as a no-show?`,
+      message: 'Their appointment will be cancelled and they will be removed from the queue. This cannot be undone.',
+      confirmLabel: 'Yes, Skip Student',
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setNotice(null);
 
@@ -660,6 +668,8 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
           )}
         </section>
       </div>
+
+      {confirmDialog}
     </div>
   );
 }

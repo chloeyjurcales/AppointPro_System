@@ -94,19 +94,6 @@ export default function LoginPage({
     }
   };
 
-  const handleOAuth = async (provider: 'azure') => {
-    setError(null);
-    try {
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider,
-      });
-      if (oauthError) setError(oauthError.message);
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
-      console.error(err);
-    }
-  };
-
   return (
     <div className="lp-page">
       {/* Left brand panel — desktop only, hidden on narrow screens via CSS */}
@@ -228,21 +215,6 @@ export default function LoginPage({
               </button>
             </form>
 
-            <div className="lp-divider">
-              <span>or continue with</span>
-            </div>
-
-            <div className="lp-social-row">
-              <button
-                type="button"
-                className="lp-social-btn"
-                onClick={() => handleOAuth('azure')}
-              >
-                <MicrosoftIcon />
-                Sign in with Microsoft
-              </button>
-            </div>
-
             <p className="lp-signup-row">
               Don&apos;t have an account?{' '}
               <button type="button" className="lp-link" onClick={onSignUp}>
@@ -342,17 +314,6 @@ function EyeOffIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-function MicrosoftIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24">
-      <rect x="2" y="2" width="9.2" height="9.2" fill="#F25022" />
-      <rect x="12.8" y="2" width="9.2" height="9.2" fill="#7FBA00" />
-      <rect x="2" y="12.8" width="9.2" height="9.2" fill="#00A4EF" />
-      <rect x="12.8" y="12.8" width="9.2" height="9.2" fill="#FFB900" />
     </svg>
   );
 }
