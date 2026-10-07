@@ -25,6 +25,7 @@ export type FacultyMember = {
   status: FacultyStatus;
   photoUri?: string;
   consultationTypes?: string;
+  about?: string;
 };
 
 type DirectoryScreenProps = {

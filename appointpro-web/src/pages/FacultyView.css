@@ -1513,3 +1513,31 @@
   overflow-y: auto;
   padding-right: 4px;
 }
+
+/* About textarea in Edit Personal Information */
+.fv-edit-field textarea {
+  border: 1px solid var(--surface-border, #e5e7eb);
+  border-radius: var(--radius-sm, 10px);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary, #1a1a1a);
+  background: var(--surface-card, #ffffff);
+  outline: none;
+  resize: vertical;
+}
+
+.fv-edit-field textarea::placeholder {
+  color: #9b9b9b;
+}
+
+.fv-edit-field textarea:focus {
+  border-color: var(--brand-500, #7a0e2c);
+  box-shadow: var(--ring-focus, 0 0 0 3px rgba(122, 14, 44, 0.16));
+}
+
+.fv-about-empty {
+  color: var(--text-secondary, #6b7280);
+  font-style: italic;
+}

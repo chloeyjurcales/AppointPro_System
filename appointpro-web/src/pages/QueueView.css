@@ -391,3 +391,25 @@
     text-align: left;
   }
 }
+
+.qv-skip-button {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #d9b3bd;
+  border-radius: 8px;
+  padding: 11px 15px;
+  background: #fff;
+  color: #7a0e2c;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qv-skip-button:hover:not(:disabled) {
+  background: #fbe3e9;
+}
+
+.qv-skip-button:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}

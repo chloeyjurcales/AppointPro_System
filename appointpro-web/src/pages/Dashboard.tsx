@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { supabase } from '../lib/supabase';
+import { useQueueEngine } from '../lib/useQueueEngine';
 import type { Session } from '@supabase/supabase-js';
 import AppointmentsView from './AppointmentsView';
 import FacultyView, { type FacultyTab } from './FacultyView';
 import NotificationsView, { type Notification } from './NotificationsView';
+import QueueView from './QueueView';
 import SettingsView from './SettingsView';
 import SlotIQModal from './SlotIQModal';
 import './Dashboard.css';
@@ -17,6 +19,7 @@ type DashboardProps = {
 export type NavId =
   | 'home'
   | 'appointments'
+  | 'queue'
   | 'faculty'
   | 'notifications'
   | 'settings';
@@ -40,6 +43,7 @@ type ScheduleItem = {
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: HomeIcon },
   { id: 'appointments', label: 'Appointments', icon: AppointmentsIcon },
+  { id: 'queue', label: 'Queue', icon: QueueIcon },
   { id: 'faculty', label: 'Faculty', icon: FacultyIcon },
   { id: 'notifications', label: 'Notifications', icon: BellIcon },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -311,6 +315,9 @@ export default function Dashboard({
 
   const facultyId = session.user.id;
 
+  // Keeps today's queue running (joins, auto-start, reminders) on every page.
+  useQueueEngine(facultyId, firstAndLast || user.email || 'Faculty');
+
   // Loads today's real appointments for this faculty member (backs both
   // the "Today's Schedule" list and the Appointments stat), then keeps
   // it live via Realtime so a new booking/cancellation shows up without
@@ -328,6 +335,8 @@ export default function Dashboard({
         )
         .eq('faculty_id', facultyId)
         .eq('date', today)
+        // Requests still waiting for approval (or declined) are not on today's schedule.
+        .or('faculty_approval_status.eq.approved,faculty_approval_status.is.null')
         .order('start_time', { ascending: true })
         .then(({ data, error }) => {
           if (!isMounted) return;
@@ -435,6 +444,9 @@ export default function Dashboard({
     };
     loadNotifications();
 
+    // Safety net in case Realtime is off for the notifications table.
+    const pollId = window.setInterval(loadNotifications, 15000);
+
     const channel = supabase
       .channel(`dashboard-notifications-${facultyId}`)
       .on(
@@ -472,6 +484,7 @@ export default function Dashboard({
 
     return () => {
       isMounted = false;
+      window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, [facultyId]);
@@ -779,6 +792,15 @@ export default function Dashboard({
           {activeNav === 'appointments' && (
             <div className="db-main-col">
               <AppointmentsView
+                session={session}
+                facultyName={firstAndLast || user.email || 'Faculty'}
+              />
+            </div>
+          )}
+
+          {activeNav === 'queue' && (
+            <div className="db-main-col">
+              <QueueView
                 session={session}
                 facultyName={firstAndLast || user.email || 'Faculty'}
               />

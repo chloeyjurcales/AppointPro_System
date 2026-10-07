@@ -207,3 +207,14 @@ export function formatCountdown(totalSeconds: number): string {
   const seconds = safeSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
+// Minutes after the scheduled start before a missing student can be skipped.
+export const NO_SHOW_GRACE_MINUTES = 15;
+
+// Seconds until faculty may skip this entry as a no-show (0 = allowed now).
+export function getSkipUnlockSeconds(entry: QueueEntry, now: Date): number {
+  if (!entry.scheduledDateKey || !entry.scheduledStartTime24) return 0;
+  const unlockAt =
+    getAppointmentStartDate(entry.scheduledDateKey, entry.scheduledStartTime24).getTime() +
+    NO_SHOW_GRACE_MINUTES * 60 * 1000;
+  return Math.max(0, Math.ceil((unlockAt - now.getTime()) / 1000));
+}

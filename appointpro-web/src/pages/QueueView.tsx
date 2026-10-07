@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import './QueueView.css';
@@ -25,6 +25,7 @@ type QueueEntry = {
         start_time: string;
         end_time: string;
         status: string;
+        faculty_approval_status?: string | null;
         reference_no: string | null;
         purpose: string | null;
         category: string | null;
@@ -52,6 +53,7 @@ type QueueEntry = {
         start_time: string;
         end_time: string;
         status: string;
+        faculty_approval_status?: string | null;
         reference_no: string | null;
         purpose: string | null;
         category: string | null;
@@ -75,22 +77,6 @@ type QueueEntry = {
     | null;
 };
 
-type ScheduledAppointment = {
-  id: string;
-  student_id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  status: string;
-  faculty_approval_status: string;
-  purpose: string | null;
-  category: string | null;
-  students:
-    | { profiles: { full_name: string } | { full_name: string }[] | null }
-    | { profiles: { full_name: string } | { full_name: string }[] | null }[]
-    | null;
-};
-
 type QueueItem = {
   id: string;
   appointmentId: string | null;
@@ -107,6 +93,9 @@ type QueueItem = {
   mode: 'Face-to-Face' | 'Online' | null;
   location: string | null;
 };
+
+// Minutes after the scheduled start before a missing student can be skipped.
+const NO_SHOW_GRACE_MINUTES = 15;
 
 function getFirst<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
@@ -143,10 +132,6 @@ function manilaDateFromDb(dateKey: string, time24: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
   const [hour, minute, second = 0] = time24.split(':').map(Number);
   return new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second));
-}
-
-function queueWindowStart(dateKey: string, startTime: string): Date {
-  return new Date(manilaDateFromDb(dateKey, startTime).getTime() - 60 * 60 * 1000);
 }
 
 function formatClockTime(time24: string | null): string {
@@ -237,8 +222,11 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const syncingRef = useRef(false);
-  const startingRef = useRef<string | null>(null);
+  // Only filled in while the queue is empty, to tell "nobody yet" from "all done".
+  const [daySummary, setDaySummary] = useState<{ completed: number; nextStart: string | null }>({
+    completed: 0,
+    nextStart: null,
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -252,7 +240,7 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
       .select(
         `id, faculty_id, appointment_id, student_name, duration_minutes, started_at, queue_date, position,
          appointments (
-           id, student_id, date, start_time, end_time, status, reference_no, purpose, category, mode, location,
+           id, student_id, date, start_time, end_time, status, faculty_approval_status, reference_no, purpose, category, mode, location,
            students ( profiles ( full_name, avatar_url ) )
          )`,
       )
@@ -270,7 +258,11 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
     const staleIds = rows
       .filter((row) => {
         const appointment = getFirst(row.appointments);
-        return !!appointment?.status && appointment.status !== 'upcoming';
+        // Cancelled / completed, or never approved by the faculty member.
+        return (
+          (!!appointment?.status && appointment.status !== 'upcoming') ||
+          (!!appointment?.faculty_approval_status && appointment.faculty_approval_status !== 'approved')
+        );
       })
       .map((row) => row.id);
 
@@ -292,6 +284,35 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
     setQueue(mapped);
     setError(null);
     setLoading(false);
+
+    if (mapped.length === 0) {
+      const { data: dayRows } = await supabase
+        .from('appointments')
+        .select('status, start_time, faculty_approval_status')
+        .eq('faculty_id', facultyId)
+        .eq('date', today);
+      const rowsToday = (dayRows ?? []) as {
+        status: string;
+        start_time: string;
+        faculty_approval_status: string | null;
+      }[];
+      const approved = rowsToday.filter(
+        (row) => (row.faculty_approval_status ?? 'approved') === 'approved',
+      );
+      const nowTime = new Date();
+      const upcoming = approved
+        .filter(
+          (row) =>
+            row.status === 'upcoming' &&
+            manilaDateFromDb(today, row.start_time) > nowTime,
+        )
+        .map((row) => row.start_time)
+        .sort();
+      setDaySummary({
+        completed: approved.filter((row) => row.status === 'completed').length,
+        nextStart: upcoming[0] ?? null,
+      });
+    }
   }, [facultyId]);
 
   useEffect(() => {
@@ -323,109 +344,10 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
     };
   }, [facultyId, loadQueue]);
 
-  // The faculty client is authoritative for scheduled queue creation, matching
-  // the mobile app. Approved appointments join exactly one hour before start.
-  useEffect(() => {
-    if (now.getSeconds() % 2 !== 0 || syncingRef.current) return;
-
-    const syncScheduledQueue = async () => {
-      const today = manilaDateKey(now);
-      const { data: appointmentData, error: appointmentError } = await supabase
-        .from('appointments')
-        .select('id, student_id, date, start_time, end_time, status, faculty_approval_status, purpose, category, students ( profiles ( full_name ) )')
-        .eq('faculty_id', facultyId)
-        .eq('date', today)
-        .eq('status', 'upcoming')
-        .eq('faculty_approval_status', 'approved');
-      const appointments = (appointmentData ?? []) as unknown as ScheduledAppointment[];
-
-      if (appointmentError || appointments.length === 0) return;
-
-      syncingRef.current = true;
-      try {
-        for (const appointment of appointments) {
-          const start = manilaDateFromDb(appointment.date, appointment.start_time);
-          const end = manilaDateFromDb(appointment.date, appointment.end_time);
-          const open = queueWindowStart(appointment.date, appointment.start_time);
-
-          if (now < open || now > end) continue;
-
-          const { data: existing, error: existingError } = await supabase
-            .from('queue_entries')
-            .select('id')
-            .eq('appointment_id', appointment.id)
-            .maybeSingle();
-          if (existingError || existing) continue;
-
-          const { data: positionRows } = await supabase
-            .from('queue_entries')
-            .select('position')
-            .eq('faculty_id', facultyId)
-            .eq('queue_date', today)
-            .order('position', { ascending: false })
-            .limit(1);
-
-          const nextPosition = ((positionRows?.[0] as { position?: number } | undefined)?.position ?? 0) + 1;
-          const studentRow = getFirst(appointment.students);
-          const studentProfile = Array.isArray(studentRow?.profiles) ? studentRow.profiles[0] : studentRow?.profiles;
-          const studentName = studentProfile?.full_name ?? 'Student';
-          const durationMinutes = Math.max(1,
-            Math.round((end.getTime() - start.getTime()) / 60000),
-          );
-
-          const { error: insertError } = await supabase.from('queue_entries').insert({
-            faculty_id: facultyId,
-            appointment_id: appointment.id,
-            student_name: studentName,
-            duration_minutes: durationMinutes,
-            queue_date: today,
-            position: nextPosition,
-          });
-
-          if (insertError && insertError.code !== '23505') {
-            console.log('Could not add appointment to queue:', insertError.message);
-          }
-        }
-      } finally {
-        syncingRef.current = false;
-        loadQueue();
-      }
-    };
-
-    syncScheduledQueue();
-  }, [facultyId, now, loadQueue]);
-
-  // Start the front appointment at its actual scheduled time. If the previous
-  // student finishes early, handleCompleteCurrent starts the next one early.
-  useEffect(() => {
-    const front = queue[0];
-    if (!front || front.startedAt || startingRef.current === front.id) return;
-    if (!front.date || !front.startTime) return;
-    if (now < manilaDateFromDb(front.date, front.startTime)) return;
-
-    startingRef.current = front.id;
-    supabase
-      .from('queue_entries')
-      .update({
-        started_at: manilaDateFromDb(front.date, front.startTime).toISOString(),
-      })
-      .eq('id', front.id)
-      .is('started_at', null)
-      .then(async ({ error: updateError }) => {
-        startingRef.current = null;
-        if (updateError) return;
-        await loadQueue();
-        if (front.studentUserId) {
-          await supabase.from('notifications').insert({
-            user_id: front.studentUserId,
-            sender_id: facultyId,
-            icon: 'sync-outline',
-            title: "It's Your Turn",
-            description: `${facultyName} is ready for you now. Your appointment has started — please head over.`,
-          });
-        }
-      });
-  }, [queue, now, facultyId, facultyName, loadQueue]);
+  // Joining the queue one hour before start, and marking the front student as
+  // started at their scheduled time, is handled for every page by
+  // useQueueEngine (mounted in Dashboard). This screen only shows the queue
+  // and handles Done / Skip.
 
   const current = queue[0] ?? null;
   const currentSeconds = current ? remainingSeconds(current, now) : 0;
@@ -463,33 +385,91 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
         });
       }
 
+      // The next student is never started early: they begin exactly at their
+      // own scheduled time (useQueueEngine marks them started then).
       const next = queue[1];
-      if (next) {
-        const { error: nextError } = await supabase
-          .from('queue_entries')
-          .update({ started_at: new Date().toISOString() })
-          .eq('id', next.id)
-          .is('started_at', null);
-        if (nextError) throw new Error(nextError.message);
-
-        if (next.studentUserId) {
-          await supabase.from('notifications').insert({
-            user_id: next.studentUserId,
-            sender_id: facultyId,
-            icon: 'sync-outline',
-            title: "It's Your Turn",
-            description: `${facultyName} finished the previous appointment early. It is now your turn. Please head over.`,
-          });
-        }
-
-        setNotice(`${next.studentName} is now being served.`);
-      } else {
-        setNotice('No more appointments in the queue for this time block.');
-      }
+      setNotice(
+        next
+          ? `${current.studentName} is done. ${next.studentName} is next and starts at ${formatClockTime(next.startTime)}.`
+          : 'No more appointments in the queue for today.',
+      );
 
       await loadQueue();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Could not advance the queue.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A student who hasn't shown up NO_SHOW_GRACE_MINUTES after their scheduled
+  // start can be skipped. The appointment is closed as cancelled (the database
+  // has no separate no-show status) and the student is told why. The next
+  // student is not started early — they begin at their own scheduled time.
+  const skipUnlockSeconds =
+    current?.date && current.startTime
+      ? Math.max(
+          0,
+          Math.ceil(
+            (manilaDateFromDb(current.date, current.startTime).getTime() +
+              NO_SHOW_GRACE_MINUTES * 60000 -
+              now.getTime()) /
+              1000,
+          ),
+        )
+      : 0;
+  const canSkip = currentStarted && skipUnlockSeconds === 0;
+
+  const handleSkipCurrent = async () => {
+    if (!current || busy || !canSkip) return;
+    if (
+      !window.confirm(
+        `Mark ${current.studentName} as a no-show? Their appointment will be cancelled.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+
+    try {
+      if (current.appointmentId) {
+        const { error: appointmentError } = await supabase
+          .from('appointments')
+          .update({ status: 'canceled', updated_at: new Date().toISOString() })
+          .eq('id', current.appointmentId)
+          .eq('faculty_id', facultyId);
+        if (appointmentError) throw new Error(appointmentError.message);
+
+        await supabase.from('slot_bookings').delete().eq('appointment_id', current.appointmentId);
+      }
+
+      const { error: deleteError } = await supabase
+        .from('queue_entries')
+        .delete()
+        .eq('id', current.id);
+      if (deleteError) throw new Error(deleteError.message);
+
+      if (current.studentUserId) {
+        await supabase.from('notifications').insert({
+          user_id: current.studentUserId,
+          sender_id: facultyId,
+          icon: 'close-circle-outline',
+          title: 'Appointment Marked as No-Show',
+          description: `You did not attend your appointment with ${facultyName} (${formatClockTime(current.startTime)} – ${formatClockTime(current.endTime)}), so it was cancelled. You can book a new appointment anytime.`,
+        });
+      }
+
+      const next = queue[1];
+      setNotice(
+        next
+          ? `${current.studentName} was skipped. ${next.studentName} is next and starts at ${formatClockTime(next.startTime)}.`
+          : `${current.studentName} was skipped. No more appointments in the queue.`,
+      );
+
+      await loadQueue();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Could not skip this student.');
     } finally {
       setBusy(false);
     }
@@ -510,8 +490,9 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
       <div className="qv-banner">
         <span className="qv-banner-icon">i</span>
         <p>
-          Approved appointments enter the queue <strong>one hour before</strong> their scheduled consultation.
-          When a consultation finishes early, use <strong>Done — Call Next</strong> to immediately advance the queue.
+          Approved appointments appear here <strong>one hour before</strong> as a reminder and countdown.
+          Each consultation starts <strong>exactly at its scheduled time</strong>. If a student hasn&apos;t shown up
+          <strong> {NO_SHOW_GRACE_MINUTES} minutes</strong> after it starts, you can skip them.
         </p>
       </div>
 
@@ -547,8 +528,26 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
           ) : !current ? (
             <div className="qv-empty">
               <div className="qv-empty-icon">✓</div>
-              <strong>No one is waiting right now.</strong>
-              <span>Upcoming approved appointments will appear one hour before their start time.</span>
+              {daySummary.nextStart ? (
+                <>
+                  <strong>No one is waiting right now.</strong>
+                  <span>
+                    Your next appointment is at {formatClockTime(daySummary.nextStart)}. It will appear here one hour before.
+                  </span>
+                </>
+              ) : daySummary.completed > 0 ? (
+                <>
+                  <strong>All consultations for today are done.</strong>
+                  <span>
+                    {daySummary.completed} {daySummary.completed === 1 ? 'appointment' : 'appointments'} completed today. You can find them under Completed in Appointments.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <strong>No one is waiting right now.</strong>
+                  <span>Upcoming approved appointments will appear one hour before their start time.</span>
+                </>
+              )}
             </div>
           ) : (
             <div className="qv-current">
@@ -597,7 +596,20 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
                   onClick={handleCompleteCurrent}
                   disabled={busy}
                 >
-                  ✓ {busy ? 'Advancing…' : currentDone ? 'Complete — Call Next' : 'Done — Call Next'}
+                  ✓ {busy ? 'Advancing…' : 'Mark as Done'}
+                </button>
+              )}
+
+              {currentStarted && (
+                <button
+                  type="button"
+                  className="qv-skip-button"
+                  onClick={handleSkipCurrent}
+                  disabled={busy || !canSkip}
+                >
+                  {canSkip
+                    ? "Student didn't show up — Skip"
+                    : `Skip available in ${formatCountdown(skipUnlockSeconds)}`}
                 </button>
               )}
             </div>

@@ -64,13 +64,6 @@ type ActionSuccess = {
   reason?: string;
 };
 
-type QueueGroup = {
-  blockKey: string;
-  blockStart: Date;
-  blockEnd: Date;
-  entries: Appointment[];
-};
-
 function pad2(value: number): string {
   return value.toString().padStart(2, '0');
 }
@@ -94,50 +87,6 @@ function formatClockTime(date: Date): string {
   hour = hour % 12;
   if (hour === 0) hour = 12;
   return `${hour}:${pad2(minute)} ${period}`;
-}
-
-// ---------- Queue timing (mirrors the mobile app's data/queue.ts) ----------
-
-// Fallback shown in the queue stats card — matches the mobile app's own
-// constant, used purely as a general average, not derived from live data.
-const AVERAGE_WAIT_MINUTES_PER_STUDENT = 10;
-
-// "5:09" from a total seconds count, for a live mm:ss countdown.
-function formatCountdown(totalSeconds: number): string {
-  const safeSeconds = Math.max(0, Math.round(totalSeconds));
-  const minutes = Math.floor(safeSeconds / 60);
-  const seconds = safeSeconds % 60;
-  return `${minutes}:${pad2(seconds)}`;
-}
-
-// Seconds left in the current student's turn, counting down from the
-// moment their turn actually started (which may be earlier than scheduled
-// if the previous student finished early).
-function getRemainingSeconds(
-  turnStartedAt: Date,
-  durationMinutes: number,
-  now: Date,
-): number {
-  const elapsedSeconds = Math.floor(
-    (now.getTime() - turnStartedAt.getTime()) / 1000,
-  );
-  return Math.max(durationMinutes * 60 - elapsedSeconds, 0);
-}
-
-// Total estimated wait, in seconds, before the student at `index` in the
-// group gets called: whatever time is left on whoever's being served now,
-// plus the full reserved duration of everyone else ahead of them.
-function getEstimatedWaitSeconds(
-  group: QueueGroup,
-  index: number,
-  currentRemainingSeconds: number,
-): number {
-  if (index <= 0) return 0;
-  let total = currentRemainingSeconds;
-  for (let i = 1; i < index; i += 1) {
-    total += group.entries[i].durationMinutes * 60;
-  }
-  return total;
 }
 
 // Shape of an `appointments` row (joined with the booking student's own
@@ -434,50 +383,18 @@ export default function AppointmentsView({
   const [rescheduleMeetingLink, setRescheduleMeetingLink] = useState('');
   const [rescheduleLocation, setRescheduleLocation] = useState('');
 
-  // ---------- Reminders + live queue ----------
-  // `now` ticks every 15s so "starts in 1 hour" / "starting now" reminders
-  // and the live-queue block stay accurate without needing a page refresh.
+  // ---------- Reminders ----------
+  // `now` ticks so "starts in 1 hour" / "starting now" reminders stay accurate
+  // without a page refresh. The live queue itself lives in the Queue tab.
   const [now, setNow] = useState(() => new Date());
   const [dismissedReminders, setDismissedReminders] = useState<Set<string>>(
     new Set(),
   );
-  const [turnStartedAt, setTurnStartedAt] = useState<Record<string, Date>>({});
-  const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const queueGroups = useMemo<QueueGroup[]>(() => {
-    const groups = new Map<string, QueueGroup>();
-
-    appointments
-      .filter((appt) => appt.status === 'Upcoming' && appt.approved)
-      .forEach((appt) => {
-        const key = `${appt.blockStart.getTime()}-${appt.blockEnd.getTime()}`;
-        const existing = groups.get(key);
-        if (existing) {
-          existing.entries.push(appt);
-        } else {
-          groups.set(key, {
-            blockKey: key,
-            blockStart: appt.blockStart,
-            blockEnd: appt.blockEnd,
-            entries: [appt],
-          });
-        }
-      });
-
-    return Array.from(groups.values()).sort(
-      (a, b) => a.blockStart.getTime() - b.blockStart.getTime(),
-    );
-  }, [appointments]);
-
-  const liveGroups = useMemo(
-    () => queueGroups.filter((g) => now >= g.blockStart && now < g.blockEnd),
-    [queueGroups, now],
-  );
 
   const reminders = useMemo(() => {
     const list: { key: string; message: string }[] = [];
@@ -521,48 +438,9 @@ export default function AppointmentsView({
     setDismissedReminders((prev) => new Set(prev).add(key));
   };
 
-  const advanceQueue = (group: QueueGroup, current: Appointment) => {
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === current.id ? { ...a, status: 'Completed' } : a)),
-    );
-    setTurnStartedAt((prev) => ({ ...prev, [group.blockKey]: new Date() }));
-
-    const remaining = group.entries.filter((entry) => entry.id !== current.id);
-    setQueueNotice(
-      remaining.length > 0
-        ? `${remaining[0].studentName} has been notified — their turn has started.`
-        : 'Queue complete for this time block.',
-    );
-
-    // The mobile app's queue lives in queue_entries; without removing the
-    // finished student's row there, they stay "in line" on every phone.
-    supabase.from('queue_entries').delete().eq('appointment_id', current.id);
-
-    supabase
-      .from('appointments')
-      .update({ status: 'completed' })
-      .eq('id', current.id)
-      .then(({ error }) => {
-        if (error) {
-          window.alert('Could not mark appointment complete: ' + error.message);
-        }
-      });
-
-    const next = remaining[0];
-    if (next?.studentUserId) {
-      supabase.from('notifications').insert({
-        user_id: next.studentUserId,
-        sender_id: facultyId,
-        icon: 'notifications-outline',
-        title: 'Your Turn',
-        description: `${facultyName} is ready for you now for ${next.reason} (${next.date}, ${next.time}).`,
-      });
-    }
-  };
-
   const counts = useMemo(
     () => ({
-      all: appointments.length,
+      all: appointments.filter((a) => !isPendingApproval(a)).length,
       pending: appointments.filter(isPendingApproval).length,
       upcoming: appointments.filter(
         (a) => a.status === 'Upcoming' && !isPendingApproval(a),
@@ -587,7 +465,7 @@ export default function AppointmentsView({
   const filtered = refQuery
     ? appointments.filter((a) => normRef(a.referenceNo).includes(refQuery))
     : activeTab === 'all'
-      ? appointments
+      ? appointments.filter((a) => !isPendingApproval(a))
       : activeTab === 'pending'
         ? appointments.filter(isPendingApproval)
         : activeTab === 'upcoming'
@@ -947,20 +825,6 @@ export default function AppointmentsView({
         </div>
       )}
 
-      {queueNotice && (
-        <div className="av-queue-toast">
-          <CheckSmallIcon />
-          <span>{queueNotice}</span>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setQueueNotice(null)}
-          >
-            <XSmallIcon />
-          </button>
-        </div>
-      )}
-
       {actionNotice && (
         <div className="av-queue-toast">
           <CheckSmallIcon />
@@ -972,101 +836,6 @@ export default function AppointmentsView({
           >
             <XSmallIcon />
           </button>
-        </div>
-      )}
-
-      {liveGroups.length > 0 && (
-        <div className="av-queue-section">
-          {liveGroups.map((group) => {
-            const current = group.entries[0];
-            const upcomingInQueue = group.entries.slice(1);
-            const turnStart = turnStartedAt[group.blockKey] ?? group.blockStart;
-            const currentRemainingSeconds = getRemainingSeconds(
-              turnStart,
-              current.durationMinutes,
-              now,
-            );
-
-            return (
-              <div key={group.blockKey} className="av-queue-card">
-                <div className="av-queue-card-header">
-                  <span className="av-queue-live-dot" />
-                  <h2>
-                    Live Queue · {formatClockTime(group.blockStart)} –{' '}
-                    {formatClockTime(group.blockEnd)}
-                  </h2>
-                </div>
-
-                <div className="av-queue-stats-row">
-                  <div className="av-queue-stat">
-                    <span className="av-queue-stat-number">
-                      {group.entries.length}
-                    </span>
-                    <span className="av-queue-stat-label">Waiting</span>
-                  </div>
-                  <div className="av-queue-stat">
-                    <span className="av-queue-stat-number">
-                      {AVERAGE_WAIT_MINUTES_PER_STUDENT}
-                    </span>
-                    <span className="av-queue-stat-label">
-                      Avg. min/student
-                    </span>
-                  </div>
-                </div>
-
-                <div className="av-queue-current">
-                  <span className="av-queue-current-badge">
-                    Now Serving · #1
-                  </span>
-                  <p className="av-queue-current-name">
-                    {current.studentName}
-                  </p>
-                  <p className="av-queue-current-info">
-                    {current.studentInfo}
-                  </p>
-                  <p className="av-queue-current-reason">{current.reason}</p>
-                  <p className="av-queue-current-timer">
-                    Allotted {current.durationMinutes} min ·{' '}
-                    {formatCountdown(currentRemainingSeconds)} remaining
-                  </p>
-                  <button
-                    type="button"
-                    className="av-queue-done-btn"
-                    onClick={() => advanceQueue(group, current)}
-                  >
-                    <CheckSmallIcon /> Done — Next Student
-                  </button>
-                </div>
-
-                {upcomingInQueue.length > 0 && (
-                  <div className="av-queue-waiting-list">
-                    <p className="av-queue-waiting-title">Waiting</p>
-                    {upcomingInQueue.map((entry, index) => {
-                      const estimatedWaitSeconds = getEstimatedWaitSeconds(
-                        group,
-                        index + 1,
-                        currentRemainingSeconds,
-                      );
-
-                      return (
-                        <div key={entry.id} className="av-queue-waiting-row">
-                          <span className="av-queue-number">
-                            #{index + 2}
-                          </span>
-                          <span className="av-queue-waiting-name">
-                            {entry.studentName}
-                          </span>
-                          <span className="av-queue-waiting-duration">
-                            {formatCountdown(estimatedWaitSeconds)} wait
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       )}
 
