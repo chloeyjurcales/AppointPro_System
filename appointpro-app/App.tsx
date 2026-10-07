@@ -134,6 +134,8 @@ import {
   getSecondsUntilAppointment,
   getAppointmentStartDate,
   isQueueWindowActive,
+  NO_SHOW_GRACE_MINUTES,
+  getSkipUnlockSeconds,
 } from './data/queue';
 import {
   NotificationItem,
@@ -668,6 +670,7 @@ function AppContent() {
     email: '',
     fullDepartment: '',
     consultationTypes: 'Face-to-Face   Online',
+    about: '',
     photoUri: undefined,
   });
 
@@ -737,6 +740,7 @@ function AppContent() {
       fullDepartment: faculty?.department ?? '',
       photoUri: profile.avatar_url ?? undefined,
       consultationTypes: faculty?.consultation_types ?? 'Face-to-Face   Online',
+      about: (faculty?.about as string | null | undefined) ?? '',
     });
     setClassScheduleStatus('done');
     setUserRole('faculty');
@@ -1105,7 +1109,7 @@ function AppContent() {
 
     supabase
       .from('faculty')
-      .select('profile_id, department, role_title, is_available, consultation_types, profiles(full_name, avatar_url)')
+      .select('*, profiles(full_name, avatar_url)')
       .then(({ data, error }) => {
         if (!isMounted) return;
         setFacultyDirectoryLoading(false);
@@ -1119,6 +1123,7 @@ function AppContent() {
           role_title: string;
           is_available: boolean;
           consultation_types?: string | null;
+          about?: string | null;
           profiles: { full_name: string; avatar_url?: string | null } | { full_name: string; avatar_url?: string | null }[] | null;
         };
         const rows = (data ?? []) as FacultyRow[];
@@ -1133,6 +1138,7 @@ function AppContent() {
               status: row.is_available ? 'available' : 'unavailable',
               photoUri: profile?.avatar_url ?? undefined,
               consultationTypes: row.consultation_types ?? undefined,
+              about: row.about ?? undefined,
             };
           })
         );
@@ -2153,7 +2159,7 @@ function AppContent() {
     const department = data.fullDepartment.trim();
     const { error: facultyError } = await supabase
       .from('faculty')
-      .update({ department, consultation_types: data.consultationTypes })
+      .update({ department, consultation_types: data.consultationTypes, about: data.about.trim() })
       .eq('profile_id', session.user.id);
 
     if (facultyError) throw new Error(facultyError.message);
@@ -2164,6 +2170,7 @@ function AppContent() {
       department,
       fullDepartment: department,
       consultationTypes: data.consultationTypes,
+      about: data.about.trim(),
       email: emailChangePending ? prev.email : data.email.trim(),
     }));
 
@@ -2908,36 +2915,82 @@ function AppContent() {
       return;
     }
 
-    // If another student is already queued, immediately start them. This is
-    // what allows Student B to begin early when Student A finishes early.
+    // The next student is never started early: they begin exactly at their own
+    // scheduled time (the auto-start effect above marks them started then).
     const next = queue[1];
-    if (next) {
-      const { error: nextError } = await supabase
-        .from('queue_entries')
-        .update({ started_at: new Date().toISOString() })
-        .eq('id', next.id)
-        .is('started_at', null);
-      if (nextError) {
-        console.log('Could not start the next queue entry:', nextError.message);
-      } else {
-        const nextStudentUserId = next.appointmentId
-          ? facultyAppointments.find((a) => a.id === next.appointmentId)?.studentUserId
-          : undefined;
-        if (nextStudentUserId) {
-          const nextRange = getScheduledTimeRangeLabel(next);
-          sendNotification(nextStudentUserId, {
-            icon: 'sync-outline',
-            title: "It's Your Turn",
-            description: `${facultyProfile.name} finished the previous appointment early. It is now your turn${nextRange ? ` (${nextRange})` : ''}. Please head over.`,
-          });
-        }
-        sendNotification(session.user.id, {
-          icon: 'sync-outline',
-          title: 'Queue Advanced',
-          description: `${next.studentName} is now being served.`,
-        });
-      }
+    showToast(
+      next
+        ? `${front.studentName} is done. ${next.studentName} is next.`
+        : `${front.studentName} is done.`
+    );
+  };
+
+  // The student at the front never showed up: cancel their appointment (the
+  // database has no separate no-show status), release their slot and queue
+  // spot and tell them why — same as the web Queue. Only allowed once the
+  // student is NO_SHOW_GRACE_MINUTES past their scheduled start. The next
+  // student is not started early; they begin at their own scheduled time.
+  const performSkipCurrentQueue = async () => {
+    if (userRole !== 'faculty' || queue.length === 0 || !session) return;
+    const front = queue[0];
+    if (front.startedAt === null) return;
+    if (getSkipUnlockSeconds(front, new Date()) > 0) {
+      showToast(`You can skip a no-show ${NO_SHOW_GRACE_MINUTES} minutes after the appointment starts.`);
+      return;
     }
+
+    if (front.appointmentId) {
+      const { error: appointmentError } = await supabase
+        .from('appointments')
+        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .eq('id', front.appointmentId);
+      if (appointmentError) {
+        showToast('Could not skip this student: ' + appointmentError.message);
+        return;
+      }
+      await supabase.from('slot_bookings').delete().eq('appointment_id', front.appointmentId);
+      setFacultyAppointments((prev) =>
+        prev.map((a) => (a.id === front.appointmentId ? { ...a, status: 'cancelled' } : a))
+      );
+    }
+
+    const { error: deleteError } = await supabase.from('queue_entries').delete().eq('id', front.id);
+    if (deleteError) {
+      showToast('Appointment cancelled, but the queue could not advance: ' + deleteError.message);
+      return;
+    }
+
+    const studentUserId = front.appointmentId
+      ? facultyAppointments.find((a) => a.id === front.appointmentId)?.studentUserId
+      : undefined;
+    if (studentUserId) {
+      sendNotification(studentUserId, {
+        icon: 'close-circle-outline',
+        title: 'Appointment Marked as No-Show',
+        description: `You did not attend your appointment with ${facultyProfile.name}, so it was cancelled. You can book a new appointment anytime.`,
+      });
+    }
+
+    const next = queue[1];
+    showToast(
+      next
+        ? `${front.studentName} was skipped. ${next.studentName} is next.`
+        : `${front.studentName} was skipped.`
+    );
+  };
+
+
+  const handleSkipCurrentQueue = () => {
+    if (userRole !== 'faculty' || queue.length === 0) return;
+    const front = queue[0];
+    Alert.alert(
+      'Mark as no-show?',
+      `${front.studentName}'s appointment will be cancelled.`,
+      [
+        { text: 'Keep waiting', style: 'cancel' },
+        { text: 'Skip student', style: 'destructive', onPress: () => void performSkipCurrentQueue() },
+      ]
+    );
   };
 
   // --- Notifications ---
@@ -4085,6 +4138,7 @@ function AppContent() {
             facultyStatus={selectedFaculty?.status}
             facultyPhotoUri={selectedFaculty?.photoUri}
             consultationTypes={selectedFaculty?.consultationTypes}
+            about={selectedFaculty?.about}
             loading={scheduleLoading}
             mode={profileMode}
             onBack={() => setScreen(profileMode === 'book' ? 'bookInstructors' : 'directory')}
@@ -4477,7 +4531,16 @@ function AppContent() {
               setFacultyActionAppointment(appointment);
               setScreen('facultyCancelAppointment');
             }}
-            onApprovePress={handleFacultyApprove}
+            onApprovePress={(appointment) =>
+              Alert.alert(
+                'Approve this request?',
+                `${appointment.studentName}'s appointment will be confirmed and they will be notified.`,
+                [
+                  { text: 'Not Yet', style: 'cancel' },
+                  { text: 'Yes, Approve', onPress: () => void handleFacultyApprove(appointment) },
+                ]
+              )
+            }
             onDeclinePress={handleFacultyDecline}
             onTabChange={handleFacultyTabChange}
           />
@@ -4563,6 +4626,7 @@ function AppContent() {
           <FacultyProfileMenuScreen
             {...facultyProfile}
             onBack={() => setScreen('facultyHome')}
+            onNamePress={() => setScreen('facultyHome')}
             onPersonalInformation={() => goToFacultyPersonalInformation('facultyProfileMenu')}
             onMySchedule={() => setScreen('facultySchedule')}
             onAbout={() => goToAbout('facultyProfileMenu')}
@@ -4616,6 +4680,7 @@ function AppContent() {
             email={facultyPersonalDraft?.email ?? facultyProfile.email}
             fullDepartment={facultyPersonalDraft?.fullDepartment ?? facultyProfile.fullDepartment}
             consultationTypes={facultyPersonalDraft?.consultationTypes ?? facultyProfile.consultationTypes}
+            about={facultyPersonalDraft?.about ?? facultyProfile.about}
             onDraftChange={setFacultyPersonalDraft}
             onSave={async (data, passwordChange) => {
               try {
@@ -4671,7 +4736,17 @@ function AppContent() {
             }}
             onReschedule={() => startStudentReschedule(todaysStudentAppointment ?? nextStudentAppointment)}
             onCancelAppointment={() => requestStudentCancel(todaysStudentAppointment ?? nextStudentAppointment)}
-            onCompleteCurrent={handleCompleteCurrentQueue}
+            onCompleteCurrent={() =>
+              Alert.alert(
+                'Mark as done?',
+                'The appointment will be moved to Completed and removed from the queue.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Yes, Mark as Done', onPress: () => void handleCompleteCurrentQueue() },
+                ]
+              )
+            }
+            onSkipCurrent={userRole === 'faculty' ? handleSkipCurrentQueue : undefined}
             onTabChange={handleTabChange}
             onFacultyTabChange={handleFacultyTabChange}
           />

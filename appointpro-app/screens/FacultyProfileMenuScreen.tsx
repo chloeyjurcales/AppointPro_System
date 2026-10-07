@@ -28,6 +28,7 @@ type FacultyProfileMenuScreenProps = {
   consultationTypes?: string;
   photoUri?: string;
   onBack?: () => void;
+  onNamePress?: () => void;
   onPersonalInformation?: () => void;
   onMySchedule?: () => void;
   onAbout?: () => void;
@@ -49,6 +50,7 @@ export default function FacultyProfileMenuScreen({
   consultationTypes = 'Face-to-Face   Online',
   photoUri,
   onBack,
+  onNamePress,
   onPersonalInformation,
   onMySchedule,
   onAbout,
@@ -110,8 +112,9 @@ export default function FacultyProfileMenuScreen({
               </View>
             )}
           </TouchableOpacity>
-
+          <TouchableOpacity onPress={onNamePress}>
           <Text style={styles.name}>{name}</Text>
+          </TouchableOpacity>
           <Text style={styles.department}>{department}</Text>
         </View>
 
