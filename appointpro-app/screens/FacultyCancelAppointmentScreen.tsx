@@ -9,11 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import ProfileAvatar from '../components/ProfileAvatar';
+import { CANCEL_REASON_MAX_LENGTH, validateCancelReason } from '../lib/cancelReason';
 
 type FacultyCancelAppointmentScreenProps = {
   studentName?: string;
@@ -37,7 +39,35 @@ export default function FacultyCancelAppointmentScreen({
   onConfirmCancel,
 }: FacultyCancelAppointmentScreenProps) {
   const [reason, setReason] = useState('');
-  const canCancel = reason.trim().length > 0;
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canCancel = reason.trim().length > 0 && !checking;
+
+  // AI reviews the reason first; the cancellation only goes ahead once it is
+  // judged genuine and the faculty confirms.
+  const submit = async () => {
+    if (!canCancel) return;
+    const text = reason.trim();
+    setChecking(true);
+    setError(null);
+    try {
+      const result = await validateCancelReason(text, 'faculty');
+      if (!result.valid) {
+        setError(result.message || 'Please share a genuine reason for cancelling.');
+        return;
+      }
+      Alert.alert(
+        'Cancel this appointment?',
+        'The student will be notified. This cannot be undone.',
+        [
+          { text: 'Keep Appointment', style: 'cancel' },
+          { text: 'Yes, Cancel It', style: 'destructive', onPress: () => onConfirmCancel?.(text) },
+        ]
+      );
+    } finally {
+      setChecking(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -63,14 +93,26 @@ export default function FacultyCancelAppointmentScreen({
 
           <Text style={styles.sectionTitle}>Reason for Cancellation</Text>
           <TextInput
-            style={styles.reasonInput}
+            style={[styles.reasonInput, !!error && { borderColor: colors.danger }]}
             placeholder="e.g. Emergency, unavailability..."
             placeholderTextColor="#9B9B9B"
             value={reason}
-            onChangeText={setReason}
+            onChangeText={(t) => {
+              setReason(t);
+              if (error) setError(null);
+            }}
             multiline
             numberOfLines={4}
+            maxLength={CANCEL_REASON_MAX_LENGTH}
+            editable={!checking}
           />
+
+          {!!error && (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
 
           <View style={styles.warningBox}>
             <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
@@ -83,23 +125,20 @@ export default function FacultyCancelAppointmentScreen({
         <View style={styles.footer}>
           <TouchableOpacity
             style={[styles.cancelButton, !canCancel && styles.cancelButtonDisabled]}
-            onPress={() =>
-              canCancel &&
-              Alert.alert(
-                'Cancel this appointment?',
-                'The student will be notified. This cannot be undone.',
-                [
-                  { text: 'Keep Appointment', style: 'cancel' },
-                  { text: 'Yes, Cancel It', style: 'destructive', onPress: () => onConfirmCancel?.(reason.trim()) },
-                ]
-              )
-            }
+            onPress={submit}
             disabled={!canCancel}
             activeOpacity={0.85}
           >
-            <Text style={styles.cancelButtonText}>Cancel Appointment</Text>
+            {checking ? (
+              <View style={styles.checkingRow}>
+                <ActivityIndicator size="small" color={colors.white} />
+                <Text style={styles.cancelButtonText}>Checking...</Text>
+              </View>
+            ) : (
+              <Text style={styles.cancelButtonText}>Cancel Appointment</Text>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.keepButton} onPress={onBack} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.keepButton} onPress={onBack} disabled={checking} activeOpacity={0.85}>
             <Text style={styles.keepButtonText}>Keep Appointment</Text>
           </TouchableOpacity>
         </View>
@@ -109,6 +148,17 @@ export default function FacultyCancelAppointmentScreen({
 }
 
 const styles = StyleSheet.create({
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#FDECEA',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: spacing.sm,
+  },
+  errorText: { flex: 1, fontSize: 12, fontWeight: '600', color: colors.danger },
+  checkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   safeArea: { flex: 1, backgroundColor: colors.white },
   flex: { flex: 1 },
   header: {

@@ -29,14 +29,16 @@ import {
 } from '../data/recurringSchedule';
 
 type FacultyAvailabilityScreenProps = {
+  /** No longer used (the info button was removed); kept so existing callers still compile. */
+  onInfoPress?: () => void;
   slotsByDate: FacultySlotsByDate;
   recurringRules: RecurringRule[];
   onBack?: () => void;
-  onInfoPress?: () => void;
   onAddTimeSlot?: (dateKey: string) => void;
   onToggleSlot?: (dateKey: string, slotId: string) => void;
   onDeleteTimeSlot?: (dateKey: string, slotId: string) => void;
   onSetRecurringSchedule?: () => void;
+  /** SlotIQ now lives only in the + button; kept optional so existing callers still compile. */
   onSlotIQPress?: () => void;
   onDeleteRecurringRule?: (ruleId: string) => void;
   onEditTimeSlot?: (dateKey: string, slotId: string, values: EditableScheduleValues) => Promise<string | null>;
@@ -49,12 +51,10 @@ export default function FacultyAvailabilityScreen({
   slotsByDate,
   recurringRules,
   onBack,
-  onInfoPress,
   onAddTimeSlot,
   onToggleSlot,
   onDeleteTimeSlot,
   onSetRecurringSchedule,
-  onSlotIQPress,
   onDeleteRecurringRule,
   onEditTimeSlot,
   onEditRecurringRule,
@@ -66,6 +66,8 @@ export default function FacultyAvailabilityScreen({
   const weekDates = getWeekDates(weekStart);
   const todayIndex = weekDates.findIndex((d) => d.isToday);
   const [selectedDayIndex, setSelectedDayIndex] = useState(todayIndex >= 0 ? todayIndex : 0);
+  // Weekly schedules are tucked into a collapsible section under the slot list.
+  const [weeklyOpen, setWeeklyOpen] = useState(false);
 
   // What the edit form is currently editing (a single slot or a whole weekly schedule).
   type EditTarget =
@@ -105,83 +107,33 @@ export default function FacultyAvailabilityScreen({
           <Ionicons name="arrow-back" size={22} color={colors.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Faculty Availability & Location</Text>
-        <TouchableOpacity onPress={onInfoPress}>
-          <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
-        </TouchableOpacity>
+        <View style={{ width: 22 }} />
       </View>
       <Text style={styles.headerSubtitle}>
         Set your office hours and where students can find you.
       </Text>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <TouchableOpacity style={styles.recurringBanner} onPress={onSetRecurringSchedule} activeOpacity={0.85}>
-          <Ionicons name="repeat" size={18} color={colors.primary} />
-          <Text style={styles.recurringBannerText}>Set a Recurring Weekly Schedule</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.slotIQBanner} onPress={onSlotIQPress} activeOpacity={0.85}>
-          <View style={styles.slotIQIcon}>
-            <Ionicons name="sparkles" size={17} color={colors.primary} />
-          </View>
-          <View style={styles.slotIQTextWrap}>
-            <Text style={styles.slotIQTitle}>Generate with SlotIQ</Text>
-            <Text style={styles.slotIQSubtitle}>Let AI suggest your weekly consultation schedule.</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-        </TouchableOpacity>
-
-        {recurringRules.length > 0 && (
-          <>
-            <Text style={styles.sectionTitle}>Active Weekly Schedules</Text>
-            {recurringRules.map((rule) => (
-              <View key={rule.id} style={styles.ruleCard}>
-                <View style={styles.ruleTextWrap}>
-                  <Text style={styles.ruleDays}>{formatDaysLabel(rule.daysOfWeek)}</Text>
-                  <Text style={styles.ruleDetail}>{formatRuleTimeLabel(rule)} · {rule.mode}</Text>
-                  <Text style={styles.ruleDetail}>{rule.location}</Text>
-                  <Text style={styles.ruleDateRange}>{formatDateRangeLabel(rule)}</Text>
-                </View>
-                <View style={styles.iconGroup}>
-                  <TouchableOpacity
-                    onPress={() =>
-                      setEditTarget({
-                        kind: 'rule',
-                        ruleId: rule.id,
-                        initial: {
-                          startHour: String(rule.startHour),
-                          startMinute: String(rule.startMinute).padStart(2, '0'),
-                          startPeriod: rule.startPeriod,
-                          endHour: String(rule.endHour),
-                          endMinute: String(rule.endMinute).padStart(2, '0'),
-                          endPeriod: rule.endPeriod,
-                          mode: rule.mode,
-                          location: rule.location,
-                        },
-                      })
-                    }
-                  >
-                    <Ionicons name="create-outline" size={18} color={colors.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() =>
-                      Alert.alert(
-                        'Delete this weekly schedule?',
-                        `Are you sure you want to delete your weekly schedule (${formatDaysLabel(rule.daysOfWeek)}, ${formatRuleTimeLabel(rule)})? All its upcoming slots will be removed. Slots that already have appointments will be kept as one-time slots.`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Yes, Delete', style: 'destructive', onPress: () => onDeleteRecurringRule?.(rule.id) },
-                        ]
-                      )
-                    }
-                  >
-                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </>
-        )}
+        {/* Quick actions: the three ways to add availability, always at the top. */}
+        <Text style={styles.sectionTitle}>Add Availability</Text>
+        <View style={styles.quickRow}>
+          <TouchableOpacity
+            style={[styles.quickTile, styles.quickTilePrimary]}
+            onPress={() => onAddTimeSlot?.(selectedDay.dateKey)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Add a time slot"
+          >
+            <Ionicons name="add-circle" size={24} color={colors.white} />
+            <Text style={[styles.quickTitle, { color: colors.white }]}>Add Time Slot</Text>
+            <Text style={[styles.quickHint, { color: '#F3D9DF' }]}>One-time, for the selected day</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickTile} onPress={onSetRecurringSchedule} activeOpacity={0.85}>
+            <Ionicons name="repeat" size={22} color={colors.primary} />
+            <Text style={styles.quickTitle}>Weekly Schedule</Text>
+            <Text style={styles.quickHint}>Repeats every week</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.weekNavRow}>
           <TouchableOpacity onPress={goToPrevWeek}>
@@ -195,7 +147,7 @@ export default function FacultyAvailabilityScreen({
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionTitle}>Select Day</Text>
+        <Text style={styles.sectionTitle}>Pick a Day</Text>
 
         <View style={styles.dateRow}>
           {weekDates.map((d, index) => {
@@ -234,7 +186,9 @@ export default function FacultyAvailabilityScreen({
         </View>
 
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Time Slots</Text>
+          <Text style={[styles.sectionTitle, { flex: 1, paddingRight: 8 }]}>
+            Time Slots for {selectedDay.day} {selectedDay.dayNum}
+          </Text>
           <TouchableOpacity
             style={styles.addSlotButton}
             onPress={() => onAddTimeSlot?.(selectedDay.dateKey)}
@@ -326,7 +280,7 @@ export default function FacultyAvailabilityScreen({
             </View>
             <Text style={styles.emptyTitle}>No time slots for this day</Text>
             <Text style={styles.emptySubtitle}>
-              Add a one-time slot, or set a recurring weekly schedule above.
+              Tap "Add Time Slot" for a one-time slot, or use Weekly Schedule at the top.
             </Text>
             <TouchableOpacity
               style={styles.emptyAddButton}
@@ -337,6 +291,67 @@ export default function FacultyAvailabilityScreen({
               <Text style={styles.emptyAddButtonText}>Add Time Slot</Text>
             </TouchableOpacity>
           </View>
+        )}
+        {recurringRules.length > 0 && (
+          <>
+            <TouchableOpacity
+              style={styles.weeklyHeader}
+              onPress={() => setWeeklyOpen((v) => !v)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Show or hide weekly schedules"
+            >
+              <Ionicons name="repeat" size={16} color={colors.primary} />
+              <Text style={styles.weeklyHeaderText}>Your Weekly Schedules ({recurringRules.length})</Text>
+              <Ionicons name={weeklyOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            {weeklyOpen && recurringRules.map((rule) => (
+              <View key={rule.id} style={styles.ruleCard}>
+                <View style={styles.ruleTextWrap}>
+                  <Text style={styles.ruleDays}>{formatDaysLabel(rule.daysOfWeek)}</Text>
+                  <Text style={styles.ruleDetail}>{formatRuleTimeLabel(rule)} · {rule.mode}</Text>
+                  <Text style={styles.ruleDetail}>{rule.location}</Text>
+                  <Text style={styles.ruleDateRange}>{formatDateRangeLabel(rule)}</Text>
+                </View>
+                <View style={styles.iconGroup}>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setEditTarget({
+                        kind: 'rule',
+                        ruleId: rule.id,
+                        initial: {
+                          startHour: String(rule.startHour),
+                          startMinute: String(rule.startMinute).padStart(2, '0'),
+                          startPeriod: rule.startPeriod,
+                          endHour: String(rule.endHour),
+                          endMinute: String(rule.endMinute).padStart(2, '0'),
+                          endPeriod: rule.endPeriod,
+                          mode: rule.mode,
+                          location: rule.location,
+                        },
+                      })
+                    }
+                  >
+                    <Ionicons name="create-outline" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert(
+                        'Delete this weekly schedule?',
+                        `Are you sure you want to delete your weekly schedule (${formatDaysLabel(rule.daysOfWeek)}, ${formatRuleTimeLabel(rule)})? All its upcoming slots will be removed. Slots that already have appointments will be kept as one-time slots.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Yes, Delete', style: 'destructive', onPress: () => onDeleteRecurringRule?.(rule.id) },
+                        ]
+                      )
+                    }
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
         )}
       </ScrollView>
 
@@ -382,6 +397,34 @@ export default function FacultyAvailabilityScreen({
 }
 
 const styles = StyleSheet.create({
+  quickRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+  quickTile: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.infoBg,
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    gap: 4,
+  },
+  quickTilePrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  quickTitle: { fontSize: 12, fontWeight: '800', color: colors.textDark, textAlign: 'center' },
+  quickHint: { fontSize: 10, color: colors.textMuted, textAlign: 'center' },
+  weeklyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  weeklyHeaderText: { flex: 1, fontSize: 13, fontWeight: '700', color: colors.textDark },
   safeArea: { flex: 1, backgroundColor: colors.white },
   header: {
     flexDirection: 'row',

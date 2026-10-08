@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
-import { CANCEL_REASON_MAX_LENGTH, validateCancelReason } from '../lib/cancelReason';
+import { CANCEL_REASON_MAX_LENGTH } from '../lib/cancelReason';
 import ProfileAvatar from './ProfileAvatar';
 
 type Props = {
@@ -31,8 +31,8 @@ type Props = {
 };
 
 /**
- * Asks the student why they are cancelling. The reason is checked by AI and
- * the appointment is only cancelled once the reason is judged genuine.
+ * Asks the student why they are cancelling. A reason is required, then the
+ * student confirms before the appointment is cancelled.
  */
 export default function CancelReasonModal({
   visible,
@@ -64,11 +64,6 @@ export default function CancelReasonModal({
     setChecking(true);
     setError(null);
     try {
-      const result = await validateCancelReason(text);
-      if (!result.valid) {
-        setError(result.message || 'Please share a genuine reason for cancelling.');
-        return;
-      }
       const confirmed = await new Promise<boolean>((resolve) => {
         Alert.alert(
           'Cancel this appointment?',
@@ -99,7 +94,7 @@ export default function CancelReasonModal({
               <Text style={styles.title}>Cancel your appointment with {facultyName}?</Text>
               {!!summary && <Text style={styles.summary}>{summary}</Text>}
               <Text style={styles.prompt}>
-                Please give a valid reason for cancelling. {facultyName} will see it.
+                Please give a reason for cancelling. {facultyName} will see it.
               </Text>
 
               <TextInput
@@ -140,7 +135,7 @@ export default function CancelReasonModal({
                   {checking ? (
                     <View style={styles.checkingRow}>
                       <ActivityIndicator size="small" color={colors.white} />
-                      <Text style={styles.cancelText}>Checking...</Text>
+                      <Text style={styles.cancelText}>Cancelling...</Text>
                     </View>
                   ) : (
                     <Text style={styles.cancelText}>Cancel Appointment</Text>

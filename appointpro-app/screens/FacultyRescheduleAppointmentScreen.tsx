@@ -269,7 +269,7 @@ export default function FacultyRescheduleAppointmentScreen({
                     isSelected && styles.slotCardSelected,
                     !fits && styles.slotCardDisabled,
                   ]}
-                  onPress={() => fits && setSelectedSlotId(slot.id)}
+                  onPress={() => fits && setSelectedSlotId(isSelected ? undefined : slot.id)}
                   disabled={!fits}
                   activeOpacity={1}
                 >

@@ -1,6 +1,6 @@
 // Builds the text of every appointment notification so the wording is
 // specific (who, what, when, why) and identical wherever it is sent from.
-import { DEPARTMENT_OPTIONS } from './departments';
+import { DEPARTMENT_OPTIONS, departmentKey } from './departments';
 
 export type Actor = {
   name: string;
@@ -11,13 +11,12 @@ export type Actor = {
 
 export type Subject = { purpose?: string | null; category?: string | null };
 
-// "CCS" -> "College of Computer Studies (CCS)"; full labels pass through.
+// Old saved values like "College of Computer Studies (CCS)" -> "CCS".
 export function fullDepartment(value?: string | null): string {
   const text = (value ?? '').trim();
   if (!text) return '';
-  const hit = DEPARTMENT_OPTIONS.find(
-    (o) => o.code.toLowerCase() === text.toLowerCase() || o.label.toLowerCase() === text.toLowerCase()
-  );
+  const key = departmentKey(text);
+  const hit = DEPARTMENT_OPTIONS.find((o) => o.code === key);
   return hit ? hit.label : text;
 }
 
@@ -136,7 +135,13 @@ export type NotificationExtra = { label: 'Reason' | 'New meeting link'; value: s
 export function splitNotificationDescription(description: string): { main: string; extras: NotificationExtra[] } {
   const text = (description ?? '').trim();
   const parts = text.split(/(?:^|\s)(Reason|New meeting link):\s*/);
-  const main = (parts[0] ?? '').trim();
+  // The sender's role/department in brackets, e.g. "Maria (Student, CCS)", is
+  // already shown above the details, so drop it from the text.
+  const main = (parts[0] ?? '')
+    .replace(/\s*\((?:[^()]|\([^()]*\))*\)/, (m) =>
+      /\b(?:Student|Faculty|CTE|CCS|CBE|CCJE|PSYCH|College)\b/i.test(m) ? '' : m
+    )
+    .trim();
   const extras: NotificationExtra[] = [];
   for (let i = 1; i < parts.length; i += 2) {
     const value = (parts[i + 1] ?? '').trim();

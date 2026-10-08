@@ -2,11 +2,11 @@
 // specific (who, what, when, why) and identical wherever it is sent from.
 // Mirrors appointpro-app/lib/departments.ts (kept in sync by hand).
 const DEPARTMENT_OPTIONS = [
-  { code: 'CTE', label: 'College of Teacher Education (CTE)' },
-  { code: 'CCS', label: 'College of Computer Studies (CCS)' },
-  { code: 'CBE', label: 'College of Business Education / Commerce (CBE)' },
-  { code: 'CCJE', label: 'College of Criminal Justice Education (CCJE)' },
-  { code: 'PSYCH', label: 'Psychology Program' },
+  { code: 'CTE', label: 'CTE' },
+  { code: 'CCS', label: 'CCS' },
+  { code: 'CBE', label: 'CBE' },
+  { code: 'CCJE', label: 'CCJE' },
+  { code: 'PSYCH', label: 'PSYCH' },
 ];
 
 export type Actor = {
@@ -18,12 +18,18 @@ export type Actor = {
 
 export type Subject = { purpose?: string | null; category?: string | null };
 
-// "CCS" -> "College of Computer Studies (CCS)"; full labels pass through.
+// Old saved values like "College of Computer Studies (CCS)" -> "CCS".
 export function fullDepartment(value?: string | null): string {
   const text = (value ?? '').trim();
   if (!text) return '';
+  const lower = text.toLowerCase();
+  const bracket = lower.match(/\(([a-z]+)\)\s*$/)?.[1];
   const hit = DEPARTMENT_OPTIONS.find(
-    (o) => o.code.toLowerCase() === text.toLowerCase() || o.label.toLowerCase() === text.toLowerCase()
+    (o) =>
+      o.code.toLowerCase() === lower ||
+      o.label.toLowerCase() === lower ||
+      o.code.toLowerCase() === bracket ||
+      (o.code === 'PSYCH' && lower.startsWith('psychology'))
   );
   return hit ? hit.label : text;
 }
@@ -134,7 +140,11 @@ export type NotificationExtra = { label: 'Reason' | 'New meeting link'; value: s
 export function splitNotificationDescription(description: string): { main: string; extras: NotificationExtra[] } {
   const text = (description ?? '').trim();
   const parts = text.split(/(?:^|\s)(Reason|New meeting link):\s*/);
-  const main = (parts[0] ?? '').trim();
+  // The sender's role/department in brackets, e.g. "Maria (Student, CCS)", is
+  // already shown above the details, so drop it from the text.
+  const main = (parts[0] ?? '')
+    .replace(/\s*\((?:[^)]*\b(?:Student|Faculty|CTE|CCS|CBE|CCJE|PSYCH|College)\b[^)]*)\)/i, '')
+    .trim();
   const extras: NotificationExtra[] = [];
   for (let i = 1; i < parts.length; i += 2) {
     const value = (parts[i + 1] ?? '').trim();

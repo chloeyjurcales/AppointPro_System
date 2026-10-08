@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
@@ -132,13 +132,55 @@ export default function StudentScheduleOnboardingScreen({
       return;
     }
 
-    nextId.current += 1;
-    setClasses((prev) => [...prev, { id: `new-${nextId.current}`, dayOfWeek: day, startTime, endTime, subject: name }]);
-    setLastAdded(`${name} · ${shortDayName(day)} ${formatTime12(startTime)} - ${formatTime12(endTime)}`);
-    setTimeBox(emptyTimeBox());
-    setSubject('');
-    setFormError(null);
+    const summary = `${name} · ${DAY_NAMES[day]} ${formatTime12(startTime)} - ${formatTime12(endTime)}`;
+    Alert.alert('Add this class?', `${summary}\n\nAre you sure you want to add this to your class schedule?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Yes, Add',
+        onPress: () => {
+          nextId.current += 1;
+          setClasses((prev) => [...prev, { id: `new-${nextId.current}`, dayOfWeek: day, startTime, endTime, subject: name }]);
+          setLastAdded(`${name} · ${shortDayName(day)} ${formatTime12(startTime)} - ${formatTime12(endTime)}`);
+          setTimeBox(emptyTimeBox());
+          setSubject('');
+          setFormError(null);
+        },
+      },
+    ]);
   };
+
+  // Anything the student would lose by leaving now: edits to the saved list, or a half-filled class form.
+  const signature = (list: ClassBlock[]) =>
+    sortClassBlocks(list)
+      .map((b) => `${b.dayOfWeek}|${b.startTime}|${b.endTime}|${b.subject}`)
+      .join(';');
+  const hasUnsavedChanges =
+    signature(classes) !== signature(initialClasses) ||
+    noClasses !== initialNoClasses ||
+    subject.trim().length > 0 ||
+    day !== null;
+
+  const handleBack = () => {
+    if (saving) return true;
+    if (!hasUnsavedChanges) {
+      onBack?.();
+      return true;
+    }
+    Alert.alert('Leave without saving?', 'Any changes you made to your class schedule will not be saved.', [
+      { text: 'Stay', style: 'cancel' },
+      { text: 'Yes, Leave', style: 'destructive', onPress: () => onBack?.() },
+    ]);
+    return true;
+  };
+
+  // Android's hardware/gesture back button gets the same confirmation (edit mode only).
+  const handleBackRef = useRef(handleBack);
+  handleBackRef.current = handleBack;
+  useEffect(() => {
+    if (isOnboarding) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => handleBackRef.current());
+    return () => sub.remove();
+  }, [isOnboarding]);
 
   const switchTab = (next: 'add' | 'list') => {
     setTab(next);
@@ -181,7 +223,7 @@ export default function StudentScheduleOnboardingScreen({
         {isOnboarding ? (
           <View style={styles.headerSide} />
         ) : (
-          <Pressable onPress={onBack} style={styles.headerSide} accessibilityRole="button" accessibilityLabel="Go back">
+          <Pressable onPress={handleBack} style={styles.headerSide} accessibilityRole="button" accessibilityLabel="Go back">
             <Ionicons name="arrow-back" size={22} color={colors.textDark} />
           </Pressable>
         )}

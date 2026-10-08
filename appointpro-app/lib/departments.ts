@@ -1,10 +1,10 @@
 // The departments a user can choose from. `label` is what is shown and saved.
 export const DEPARTMENT_OPTIONS = [
-  { code: 'CTE', label: 'College of Teacher Education (CTE)' },
-  { code: 'CCS', label: 'College of Computer Studies (CCS)' },
-  { code: 'CBE', label: 'College of Business Education / Commerce (CBE)' },
-  { code: 'CCJE', label: 'College of Criminal Justice Education (CCJE)' },
-  { code: 'PSYCH', label: 'Psychology Program' },
+  { code: 'CTE', label: 'CTE' },
+  { code: 'CCS', label: 'CCS' },
+  { code: 'CBE', label: 'CBE' },
+  { code: 'CCJE', label: 'CCJE' },
+  { code: 'PSYCH', label: 'PSYCH' },
 ] as const;
 
 export function departmentKey(value?: string | null): string {
@@ -18,7 +18,7 @@ export function departmentKey(value?: string | null): string {
     const hit = DEPARTMENT_OPTIONS.find((option) => option.code.toLowerCase() === inBrackets);
     if (hit) return hit.code;
   }
-  if (text === 'psychology') return 'PSYCH';
+  if (text === 'psychology' || text === 'psychology program') return 'PSYCH';
   return text;
 }
 

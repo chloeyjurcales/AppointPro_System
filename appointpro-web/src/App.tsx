@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase'
 import LoginPage from './pages/LoginPage'
 import FacultySignUpPage from './pages/FacultySignUpPage'
 import Dashboard from './pages/Dashboard'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 
 type AuthView = 'login' | 'signup'
 
@@ -11,6 +12,13 @@ function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [authView, setAuthView] = useState<AuthView>('login')
+  // True while the user is setting a new password after opening the reset link
+  // from their email. Checked from the URL up front because Supabase clears the
+  // link's hash once it has read it.
+  const [recovering, setRecovering] = useState(
+    () => /type=recovery/.test(window.location.hash),
+  )
+  const [resetNotice, setResetNotice] = useState(false)
 
   useEffect(() => {
     // Restore an existing session on page load/refresh...
@@ -29,7 +37,8 @@ function App() {
 
     // ...and keep it in sync afterwards (login, logout, token refresh).
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
+      (event, newSession) => {
+        if (event === 'PASSWORD_RECOVERY') setRecovering(true)
         setSession(newSession)
       },
     )
@@ -39,6 +48,26 @@ function App() {
 
   if (checkingSession) {
     return null
+  }
+
+  // Opened from a password-reset email: ask for the new password first
+  // instead of dropping straight into the dashboard.
+  if (recovering) {
+    return (
+      <ResetPasswordPage
+        onDone={() => {
+          setRecovering(false)
+          setSession(null)
+          setAuthView('login')
+          setResetNotice(true)
+        }}
+        onCancel={() => {
+          setRecovering(false)
+          setSession(null)
+          setAuthView('login')
+        }}
+      />
+    )
   }
 
   // Only a real, Supabase-authenticated session gets into the app. Anyone
@@ -69,6 +98,21 @@ function App() {
   }
 
   return (
+    <>
+    {resetNotice && (
+      <div
+        role="status"
+        style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          background: '#1E8E3E', color: '#fff', padding: '10px 18px',
+          borderRadius: 10, fontSize: 14, fontWeight: 600, zIndex: 1000,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+        }}
+        onClick={() => setResetNotice(false)}
+      >
+        Password updated. Please log in with your new password.
+      </div>
+    )}
     <LoginPage
       onSignUp={() => setAuthView('signup')}
       onForgotPassword={() => {
@@ -89,6 +133,7 @@ function App() {
         // Supabase signs the user in, which re-renders into <Dashboard>.
       }}
     />
+    </>
   )
 }
 

@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 
+export type CancelRole = 'student' | 'faculty';
+
 export type CancelReasonCheck = {
   valid: boolean;
   /** Friendly explanation shown to the student when the reason is rejected. */
@@ -18,7 +20,7 @@ const PLACEHOLDERS = new Set([
  * Basic offline check. Used if the AI service can't be reached, so students
  * aren't blocked from cancelling when the service is down.
  */
-export function basicReasonCheck(reason: string): CancelReasonCheck {
+export function basicReasonCheck(reason: string, role: CancelRole = 'student'): CancelReasonCheck {
   const text = reason.trim();
   const fail = (message: string) => ({ valid: false, message });
 
@@ -32,7 +34,7 @@ export function basicReasonCheck(reason: string): CancelReasonCheck {
   const letters = (text.match(/\p{L}/gu) ?? []).length;
   const words = text.split(/\s+/).filter((w) => /\p{L}/u.test(w));
   if (letters / text.length < 0.6 || words.length < 2) {
-    return fail('Please write your reason in a clear sentence so your faculty understands.');
+    return fail('Please write your reason in a clear sentence so the other person understands.');
   }
   if (/(.)\1{4,}/u.test(text)) {
     return fail('That does not look like a real reason. Please explain why you need to cancel.');
@@ -44,16 +46,19 @@ export function basicReasonCheck(reason: string): CancelReasonCheck {
  * Asks the `validate-cancel-reason` edge function (Gemini) whether the reason
  * is genuine. Falls back to the basic check if the service is unavailable.
  */
-export async function validateCancelReason(reason: string): Promise<CancelReasonCheck> {
+export async function validateCancelReason(
+  reason: string,
+  role: CancelRole = 'student'
+): Promise<CancelReasonCheck> {
   const trimmed = reason.trim().slice(0, CANCEL_REASON_MAX_LENGTH);
 
   // Obvious junk never needs an AI call.
-  const basic = basicReasonCheck(trimmed);
+  const basic = basicReasonCheck(trimmed, role);
   if (!basic.valid) return basic;
 
   try {
     const { data, error } = await supabase.functions.invoke('validate-cancel-reason', {
-      body: { reason: trimmed },
+      body: { reason: trimmed, role },
     });
     if (error || typeof data?.valid !== 'boolean') return basic;
     return { valid: data.valid, message: typeof data.message === 'string' ? data.message : '' };

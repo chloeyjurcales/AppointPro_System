@@ -290,6 +290,29 @@ type AppointmentsViewProps = {
   facultyName: string;
 };
 
+// Asks the validate-cancel-reason edge function (AI) whether a faculty member's
+// cancellation reason is genuine. If the service can't be reached, a basic
+// offline check is used so faculty aren't blocked when the service is down.
+async function validateFacultyCancelReason(reason: string): Promise<{ valid: boolean; message: string }> {
+  const text = reason.trim().slice(0, 300);
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  const words = text.split(/\s+/).filter((w) => /\p{L}/u.test(w));
+  const basic =
+    text.length < 10 || letters / text.length < 0.6 || words.length < 2 || /(.)\1{4,}/u.test(text)
+      ? { valid: false, message: 'Please explain your reason in a clear sentence so the student understands.' }
+      : { valid: true, message: '' };
+  if (!basic.valid) return basic;
+  try {
+    const { data, error } = await supabase.functions.invoke('validate-cancel-reason', {
+      body: { reason: text, role: 'faculty' },
+    });
+    if (error || typeof data?.valid !== 'boolean') return basic;
+    return { valid: data.valid, message: typeof data.message === 'string' ? data.message : '' };
+  } catch {
+    return basic;
+  }
+}
+
 export default function AppointmentsView({
   session,
   facultyName,
@@ -365,6 +388,9 @@ export default function AppointmentsView({
   const [modal, setModal] = useState<ModalState>({ type: 'none' });
 
   const [cancelReason, setCancelReason] = useState('');
+  // Set when the AI rejects the cancellation reason.
+  const [cancelReasonError, setCancelReasonError] = useState<string | null>(null);
+  const [cancelChecking, setCancelChecking] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
   // Blocks a double-click from approving/declining the same request twice.
   const actionInFlightRef = useRef(false);
@@ -474,7 +500,11 @@ export default function AppointmentsView({
             )
           : appointments.filter((a) => a.status.toLowerCase() === activeTab);
 
-  const closeModal = () => setModal({ type: 'none' });
+  const closeModal = () => {
+    setModal({ type: 'none' });
+    setCancelReasonError(null);
+    setCancelChecking(false);
+  };
 
   const openDetails = (appointment: Appointment) => {
     setModal({ type: 'details', appointment });
@@ -558,6 +588,16 @@ export default function AppointmentsView({
     actionInFlightRef.current = true;
     setActionBusy(true);
     try {
+      // AI reviews the reason first; nothing is cancelled unless it is genuine.
+      setCancelChecking(true);
+      setCancelReasonError(null);
+      const check = await validateFacultyCancelReason(reason);
+      setCancelChecking(false);
+      if (!check.valid) {
+        setCancelReasonError(check.message || 'Please share a genuine reason for cancelling.');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('appointments')
         .update({ status: 'canceled', updated_at: new Date().toISOString() })
@@ -613,6 +653,7 @@ export default function AppointmentsView({
     } finally {
       actionInFlightRef.current = false;
       setActionBusy(false);
+      setCancelChecking(false);
     }
   };
 
@@ -1088,8 +1129,20 @@ export default function AppointmentsView({
                   rows={4}
                   placeholder="e.g. Faculty unavailable, emergency..."
                   value={cancelReason}
-                  onChange={(event) => setCancelReason(event.target.value)}
+                  onChange={(event) => {
+                    setCancelReason(event.target.value);
+                    if (cancelReasonError) setCancelReasonError(null);
+                  }}
+                  maxLength={300}
+                  disabled={actionBusy}
                 />
+
+                {cancelReasonError && (
+                  <div className="av-modal-warning" role="alert">
+                    <AlertIcon />
+                    <p>{cancelReasonError}</p>
+                  </div>
+                )}
 
                 <div className="av-modal-warning">
                   <AlertIcon />
@@ -1106,7 +1159,7 @@ export default function AppointmentsView({
                     disabled={!cancelReason.trim() || actionBusy}
                     onClick={confirmCancel}
                   >
-                    {actionBusy ? 'Cancelling…' : 'Cancel Appointment'}
+                    {cancelChecking ? 'Checking…' : actionBusy ? 'Cancelling…' : 'Cancel Appointment'}
                   </button>
                   <button
                     type="button"
