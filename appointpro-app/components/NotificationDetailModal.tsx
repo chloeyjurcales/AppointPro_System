@@ -1,9 +1,10 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import { NotificationItem } from '../data/notifications';
 import ProfileAvatar from './ProfileAvatar';
+import { splitNotificationDescription } from '../lib/notificationMessages';
 
 export type NotificationPerson = { name: string; photoUri?: string | null };
 
@@ -36,6 +37,7 @@ function formatReceived(iso: string): string {
 export default function NotificationDetailModal({ notification, people = [], onClose }: Props) {
   // Prefer the real sender saved with the notification; otherwise fall back to
   // matching a known person's name in the text.
+  const { main, extras } = splitNotificationDescription(notification?.description ?? '');
   const person: NotificationPerson | null = notification?.senderName
     ? { name: notification.senderName, photoUri: notification.senderAvatarUrl }
     : findPerson(notification, people);
@@ -78,8 +80,22 @@ export default function NotificationDetailModal({ notification, people = [], onC
               <ScrollView style={styles.bodyScroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.sectionLabel}>Details</Text>
                 <Text style={styles.body}>
-                  {notification.description || 'No additional details were included with this notification.'}
+                  {main || 'No additional details were included with this notification.'}
                 </Text>
+                {extras.map((extra) => {
+                  const isLink = extra.label === 'New meeting link' && /^https?:\/\//i.test(extra.value);
+                  return (
+                    <View key={extra.label} style={styles.extraBlock}>
+                      <Text style={styles.sectionLabel}>{extra.label === 'Reason' ? 'Reason' : 'New meeting link'}</Text>
+                      <Text
+                        style={[styles.body, isLink && styles.link]}
+                        onPress={isLink ? () => Linking.openURL(extra.value) : undefined}
+                      >
+                        {extra.value}
+                      </Text>
+                    </View>
+                  );
+                })}
               </ScrollView>
 
               <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.85}>
@@ -165,6 +181,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     color: colors.textDark,
+  },
+  extraBlock: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  link: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   closeButton: {
     marginTop: spacing.lg,

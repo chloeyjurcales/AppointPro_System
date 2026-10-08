@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useConfirm } from '../lib/useConfirm';
+import { splitNotificationDescription } from '../lib/notificationMessages';
 import './NotificationsView.css';
 
 export type NotificationType =
@@ -363,8 +364,7 @@ function extractDetail(description: string, label: 'purpose' | 'reason' | 'when'
   }
 
   if (label === 'reason') {
-    const match = text.match(/reason:\s*(.+)$/i);
-    return match?.[1]?.trim() || null;
+    return splitNotificationDescription(text).extras.find((e) => e.label === 'Reason')?.value ?? null;
   }
 
   const match = text.match(/(?:on|to) ((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[^.]*)\.?$/i);
@@ -374,13 +374,15 @@ function extractDetail(description: string, label: 'purpose' | 'reason' | 'when'
 function NotificationDetailModal({ notification, onClose }: NotificationDetailModalProps) {
   const details = useMemo(() => {
     if (!notification) {
-      return { purpose: null, reason: null, when: null };
+      return { purpose: null, reason: null, when: null, main: '', meetingLink: null };
     }
 
     const purpose = extractDetail(notification.message, 'purpose');
     const reason = extractDetail(notification.message, 'reason');
     const when = extractDetail(notification.message, 'when');
-    return { purpose, reason, when };
+    const { main, extras } = splitNotificationDescription(notification.message);
+    const meetingLink = extras.find((e) => e.label === 'New meeting link')?.value ?? null;
+    return { purpose, reason, when, main, meetingLink };
   }, [notification]);
 
   if (!notification) return null;
@@ -437,10 +439,22 @@ function NotificationDetailModal({ notification, onClose }: NotificationDetailMo
           {details.when && (
             <div className="nv-detail-field"><span>Appointment / schedule</span><strong>{details.when}</strong></div>
           )}
+          <div className="nv-detail-field nv-detail-field-wide"><span>What happened</span><strong>{details.main || 'No additional details were included.'}</strong></div>
           {details.reason && (
-            <div className="nv-detail-field nv-detail-field-wide"><span>Why / Reason</span><strong>{details.reason}</strong></div>
+            <div className="nv-detail-field nv-detail-field-wide"><span>Reason</span><strong>{details.reason}</strong></div>
           )}
-          <div className="nv-detail-field nv-detail-field-wide"><span>What happened</span><strong>{notification.message || 'No additional details were included.'}</strong></div>
+          {details.meetingLink && (
+            <div className="nv-detail-field nv-detail-field-wide">
+              <span>New meeting link</span>
+              <strong>
+                {/^https?:\/\//i.test(details.meetingLink) ? (
+                  <a href={details.meetingLink} target="_blank" rel="noreferrer">{details.meetingLink}</a>
+                ) : (
+                  details.meetingLink
+                )}
+              </strong>
+            </div>
+          )}
           <div className="nv-detail-field"><span>Received</span><strong>{notification.fullTime || notification.time}</strong></div>
           <div className="nv-detail-field"><span>Status</span><strong>{notification.unread ? 'Unread' : 'Read'}</strong></div>
         </div>

@@ -125,3 +125,20 @@ export function rescheduledMessage(
   if ((extra?.meetingLink ?? '').trim()) description += ` New meeting link: ${extra!.meetingLink!.trim()}`;
   return { icon: 'calendar-outline', title: `Reschedule from ${by.name}`, description };
 }
+
+// Splits a stored notification description into the main sentence(s) plus the
+// labelled extras ("Reason: ...", "New meeting link: ...") so the detail view
+// can show each one on its own line. Works on notifications already saved.
+export type NotificationExtra = { label: 'Reason' | 'New meeting link'; value: string };
+
+export function splitNotificationDescription(description: string): { main: string; extras: NotificationExtra[] } {
+  const text = (description ?? '').trim();
+  const parts = text.split(/(?:^|\s)(Reason|New meeting link):\s*/);
+  const main = (parts[0] ?? '').trim();
+  const extras: NotificationExtra[] = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    const value = (parts[i + 1] ?? '').trim();
+    if (value) extras.push({ label: parts[i] as NotificationExtra['label'], value });
+  }
+  return { main, extras };
+}
