@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -62,12 +62,20 @@ export default function FacultyPersonalInformationScreen({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const update = (field: keyof FacultyPersonalInformation) => (value: string) =>
-    setForm((prev) => {
-      const next = { ...prev, [field]: value };
-      onDraftChange?.(next);
-      return next;
-    });
+  // Keeps the latest form so quick typing never works from a stale copy.
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  // The parent is told about the draft here, in the event handler. It must not
+  // happen inside the setForm updater: that runs during render, and updating the
+  // parent (AppContent) from there triggers React's "Cannot update a component
+  // while rendering a different component" error.
+  const update = (field: keyof FacultyPersonalInformation) => (value: string) => {
+    const next = { ...formRef.current, [field]: value };
+    formRef.current = next;
+    setForm(next);
+    onDraftChange?.(next);
+  };
 
   // Validates the form, then asks the user to confirm before anything is saved.
   const handleSave = () => {

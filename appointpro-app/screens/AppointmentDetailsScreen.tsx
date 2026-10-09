@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import ProfileAvatar from '../components/ProfileAvatar';
+import { splitLocationAndLink } from '../lib/consultationInfo';
 
 type AppointmentDetailsScreenProps = {
   onBack?: () => void;
@@ -57,9 +58,13 @@ export default function AppointmentDetailsScreen({
 }: AppointmentDetailsScreenProps) {
   const isOnline = mode.trim().toLowerCase() === 'online';
 
+  // "Both" appointments hold a room and a meeting link in one location text.
+  const bothInfo = !isOnline ? splitLocationAndLink(location) : { place: null, link: null };
+  const isBoth = !!bothInfo.place && !!bothInfo.link;
   const handleOpenMeetingLink = () => {
-    if (!location) return;
-    const url = /^https?:\/\//i.test(location) ? location : `https://${location}`;
+    const target = isBoth ? bothInfo.link : location;
+    if (!target) return;
+    const url = /^https?:\/\//i.test(target) ? target : `https://${target}`;
     Linking.openURL(url).catch(() => {});
   };
 
@@ -121,9 +126,19 @@ export default function AppointmentDetailsScreen({
                 </Text>
               </TouchableOpacity>
             ) : (
-              <Text style={styles.detailText}>{location}</Text>
+              <Text style={styles.detailText}>{isBoth ? bothInfo.place : location}</Text>
             )}
           </View>
+          {isBoth && (
+            <View style={styles.detailRow}>
+              <Ionicons name="link-outline" size={16} color={colors.primary} style={styles.detailIcon} />
+              <TouchableOpacity style={styles.linkTouchable} onPress={handleOpenMeetingLink} activeOpacity={0.7}>
+                <Text style={styles.linkText} numberOfLines={1}>
+                  {bothInfo.link}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
           <View style={styles.detailRow}>
             <Ionicons name="people-outline" size={16} color={colors.primary} style={styles.detailIcon} />
             <Text style={styles.detailText}>{mode}</Text>

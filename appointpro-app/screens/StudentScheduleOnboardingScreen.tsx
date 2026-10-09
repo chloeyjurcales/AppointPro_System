@@ -194,8 +194,19 @@ export default function StudentScheduleOnboardingScreen({
     setLastAdded(null);
   };
 
-  const save = async () => {
+  // Ask first, then save.
+  const save = () => {
     if (!canSave) return;
+    const message = noClasses
+      ? 'You are saving that you have no classes.'
+      : `You are saving ${classes.length} ${classes.length === 1 ? 'class' : 'classes'} to your schedule.`;
+    Alert.alert('Save your class schedule?', message, [
+      { text: 'Not Yet', style: 'cancel' },
+      { text: 'Yes, Save', onPress: () => void performSave() },
+    ]);
+  };
+
+  const performSave = async () => {
     setSaving(true);
     setSaveError(null);
     try {

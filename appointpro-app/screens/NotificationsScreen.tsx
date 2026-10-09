@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -79,8 +80,23 @@ export default function NotificationsScreen({
   };
 
   const handleDeleteSelected = () => {
-    onDeleteNotifications?.(Array.from(selectedIds));
-    exitSelectMode();
+    const count = selectedIds.size;
+    if (count === 0) return;
+    Alert.alert(
+      count === 1 ? 'Delete this notification?' : `Delete ${count} notifications?`,
+      'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Delete',
+          style: 'destructive',
+          onPress: () => {
+            onDeleteNotifications?.(Array.from(selectedIds));
+            exitSelectMode();
+          },
+        },
+      ]
+    );
   };
 
   const handleRowPress = (item: NotificationItem) => {

@@ -26,6 +26,8 @@ type FacultyProfileScreenProps = {
   facultyStatus?: 'available' | 'unavailable';
   facultyPhotoUri?: string;
   consultationTypes?: string;
+  // The faculty's own "About" text from their profile.
+  about?: string;
   // True while this faculty's schedule is still being fetched.
   loading?: boolean;
   // 'view' (opened from the Directory) only shows the faculty's details: no schedule and
@@ -47,6 +49,7 @@ export default function FacultyProfileScreen({
   facultyStatus = 'available',
   facultyPhotoUri, 
   consultationTypes = 'Face-to-Face · Online',
+  about,
   loading = false,
   mode = 'book',
   onBack,
@@ -129,7 +132,7 @@ export default function FacultyProfileScreen({
             <View style={styles.infoTextWrap}>
               <Text style={styles.infoLabel}>About</Text>
               <Text style={styles.infoValue}>
-                Specialized in programming, systems analysis and databases.
+                {about?.trim() ? about.trim() : 'This instructor has not added a description yet.'}
               </Text>
             </View>
           </View>

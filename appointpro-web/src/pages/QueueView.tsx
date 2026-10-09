@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase'
+import { isBothLocation, splitLocationAndLink } from '../lib/consultationInfo';
 import { useConfirm } from '../lib/useConfirm';
 import './QueueView.css';
 
@@ -586,16 +587,31 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
                     : `Starts in ${formatCountdown(currentSeconds)}`}
               </div>
 
-              {current.mode === 'Online' && current.location && (
-                <a
-                  className="qv-meeting-link"
-                  href={/^https?:\/\//i.test(current.location) ? current.location : `https://${current.location}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open meeting link
-                </a>
-              )}
+              {/* Online / Both appointments: the location and link are always visible. */}
+              {(() => {
+                const info = splitLocationAndLink(current.location)
+                const isBoth = current.mode !== 'Online' && !!info.place && !!info.link
+                const link = current.mode === 'Online' ? current.location : isBoth ? info.link : null
+                if (!link) return null
+                return (
+                  <div style={{ margin: '10px 0', fontSize: 13, lineHeight: 1.6 }}>
+                    <strong>{isBoth ? 'Face-to-Face or Online' : 'Online Consultation'}</strong>
+                    {isBoth && <div>Location: {info.place}</div>}
+                    <div>
+                      Link:{' '}
+                      <a
+                        className="qv-meeting-link"
+                        href={/^https?:\/\//i.test(link) ? link : `https://${link}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link}
+                      </a>
+                    </div>
+                    {isBoth && <small>Tell the student to go to the location or use the link.</small>}
+                  </div>
+                )
+              })()}
 
               {currentStarted && (
                 <button
@@ -651,6 +667,13 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
                     <div className="qv-row-main">
                       <strong>{item.studentName}</strong>
                       <span>{formatClockTime(item.startTime)} – {formatClockTime(item.endTime)} · {item.purpose}</span>
+                      {item.mode === 'Online' && item.location ? (
+                        <span>Online · {item.location}</span>
+                      ) : isBothLocation(item.location) ? (
+                        <span>
+                          {splitLocationAndLink(item.location).place} · {splitLocationAndLink(item.location).link}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="qv-row-status">
                       {isCurrent

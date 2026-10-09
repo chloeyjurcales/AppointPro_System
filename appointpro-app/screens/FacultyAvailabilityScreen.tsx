@@ -114,20 +114,9 @@ export default function FacultyAvailabilityScreen({
       </Text>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Quick actions: the three ways to add availability, always at the top. */}
-        <Text style={styles.sectionTitle}>Add Availability</Text>
+        {/* Weekly schedule shortcut at the top; one-time slots are added in the Time Slots section below. */}
+        <Text style={styles.sectionTitle}>Recurring Availability</Text>
         <View style={styles.quickRow}>
-          <TouchableOpacity
-            style={[styles.quickTile, styles.quickTilePrimary]}
-            onPress={() => onAddTimeSlot?.(selectedDay.dateKey)}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Add a time slot"
-          >
-            <Ionicons name="add-circle" size={24} color={colors.white} />
-            <Text style={[styles.quickTitle, { color: colors.white }]}>Add Time Slot</Text>
-            <Text style={[styles.quickHint, { color: '#F3D9DF' }]}>One-time, for the selected day</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.quickTile} onPress={onSetRecurringSchedule} activeOpacity={0.85}>
             <Ionicons name="repeat" size={22} color={colors.primary} />
             <Text style={styles.quickTitle}>Weekly Schedule</Text>
@@ -280,7 +269,7 @@ export default function FacultyAvailabilityScreen({
             </View>
             <Text style={styles.emptyTitle}>No time slots for this day</Text>
             <Text style={styles.emptySubtitle}>
-              Tap "Add Time Slot" for a one-time slot, or use Weekly Schedule at the top.
+              Tap "Add Time Slot" for a one-time slot, or set a Weekly Schedule at the top.
             </Text>
             <TouchableOpacity
               style={styles.emptyAddButton}

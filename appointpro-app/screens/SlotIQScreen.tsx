@@ -33,6 +33,16 @@ import {
   rangeLengthMinutes,
 } from '../lib/slotiq';
 import { toDateKey } from '../data/facultySlots';
+import { combineLocationAndLink, isBothLocation, splitLocationAndLink } from '../lib/consultationInfo';
+
+// Short label for a slot's where, e.g. "Face-to-Face + Online · Office 204 · https://…".
+function describeConsultation(mode: string, location: string): string {
+  if (isBothLocation(location)) {
+    const { place, link } = splitLocationAndLink(location);
+    return `Face-to-Face + Online · ${place} · ${link}`;
+  }
+  return `${mode} · ${location}`;
+}
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // A day starts with no classes; "Add class" adds a class time, up to this limit.
@@ -156,8 +166,11 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const [duration, setDuration] = useState('30');
   const [minSlotsPerDay, setMinSlotsPerDay] = useState('2');
   const [maxSlotsPerDay, setMaxSlotsPerDay] = useState('4');
-  const [mode, setMode] = useState<'Face-to-Face' | 'Online'>('Face-to-Face');
+  // "Both" = face-to-face AND online: the faculty gives a room and a meeting link,
+  // and tells the student which to use when the queue starts.
+  const [mode, setMode] = useState<'Face-to-Face' | 'Online' | 'Both'>('Face-to-Face');
   const [location, setLocation] = useState('');
+  const [meetingLink, setMeetingLink] = useState('');
   // Class times per day (busy time). Each entry is one class time picked with hour / minute / AM-PM dropdowns.
   const [dayInputs, setDayInputs] = useState<Record<number, TimeBox[]>>({});
   // Days consultations may be held on; default Monday-Friday.
@@ -294,7 +307,12 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
       Alert.alert('Check your limits', 'The minimum suggestions per day cannot be higher than the maximum.');
       return;
     }
-    if (!location.trim()) {
+    if (mode === 'Both') {
+      if (!meetingLink.trim() || !location.trim()) {
+        Alert.alert('Details required', 'Enter both the meeting link and the consultation location.');
+        return;
+      }
+    } else if (!location.trim()) {
       Alert.alert('Location required', mode === 'Online' ? 'Enter the meeting platform or link.' : 'Enter the consultation room/location.');
       return;
     }
@@ -311,8 +329,9 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
     setPendingOptions({
       semesterEndDate: end,
       consultationDurationMinutes: minutes,
-      preferredMode: mode,
-      preferredLocation: location.trim(),
+      // "Both" is saved as a normal slot whose location holds the room and the link.
+      preferredMode: mode === 'Both' ? 'Face-to-Face' : mode,
+      preferredLocation: mode === 'Both' ? combineLocationAndLink(location, meetingLink) : location.trim(),
       minSlotsPerDay: minPerDay,
       maxSlotsPerDay: maxPerDay,
       classSchedule,
@@ -363,7 +382,12 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
   const daysWithErrors = activeDayItems.filter((item) => item.error).map((item) => DAY_NAMES[item.day]);
   if (daysWithErrors.length) issues.push(`Fix the class times on ${daysWithErrors.join(', ')}.`);
   if (!parseDateInput(semesterEndDate)) issues.push('Enter a valid semester end date.');
-  if (!location.trim()) issues.push(mode === 'Online' ? 'Enter the meeting platform or link.' : 'Enter the consultation location.');
+  if (mode === 'Both') {
+    if (!meetingLink.trim()) issues.push('Enter the meeting link.');
+    if (!location.trim()) issues.push('Enter the consultation location.');
+  } else if (!location.trim()) {
+    issues.push(mode === 'Online' ? 'Enter the meeting platform or link.' : 'Enter the consultation location.');
+  }
   const classCount = activeDayItems.reduce((total, item) => total + item.ranges.length, 0);
   const endDateLabel = parseDateInput(semesterEndDate) ? formatDateLabel(semesterEndDate.trim()) : null;
 
@@ -616,7 +640,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
           <Text style={styles.cardTitle}>Where</Text>
           <Field label="Consultation mode">
             <View style={styles.choiceRow}>
-              {(['Face-to-Face', 'Online'] as const).map((item) => {
+              {(['Face-to-Face', 'Online', 'Both'] as const).map((item) => {
                 const active = mode === item;
                 return (
                   <Pressable
@@ -627,7 +651,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                     accessibilityState={{ selected: active }}
                   >
                     <Ionicons
-                      name={item === 'Online' ? 'videocam-outline' : 'people-outline'}
+                      name={item === 'Online' ? 'videocam-outline' : item === 'Both' ? 'swap-horizontal-outline' : 'people-outline'}
                       size={18}
                       color={active ? colors.primary : colors.textMuted}
                     />
@@ -638,17 +662,48 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
             </View>
           </Field>
 
-          <Field label={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}>
-            <TextInput
-              value={location}
-              onChangeText={setLocation}
-              placeholder={mode === 'Online' ? 'e.g. Google Meet' : 'e.g. Faculty Office 204'}
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-              autoCapitalize="none"
-              accessibilityLabel={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}
-            />
-          </Field>
+          {mode === 'Both' ? (
+            <>
+              <Field label="Meeting link">
+                <TextInput
+                  value={meetingLink}
+                  onChangeText={setMeetingLink}
+                  placeholder="e.g. https://meet.google.com/abc-defg-hij"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  accessibilityLabel="Meeting link"
+                />
+              </Field>
+              <Field label="Consultation location">
+                <TextInput
+                  value={location}
+                  onChangeText={setLocation}
+                  placeholder="e.g. Faculty Office 204"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  accessibilityLabel="Consultation location"
+                />
+              </Field>
+              <Text style={styles.hintText}>
+                Students will see both. When the queue starts, tell them whether to go to the location or use the link.
+              </Text>
+            </>
+          ) : (
+            <Field label={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}>
+              <TextInput
+                value={location}
+                onChangeText={setLocation}
+                placeholder={mode === 'Online' ? 'e.g. Google Meet' : 'e.g. Faculty Office 204'}
+                placeholderTextColor={colors.textMuted}
+                style={styles.input}
+                autoCapitalize="none"
+                accessibilityLabel={mode === 'Online' ? 'Meeting platform or link' : 'Consultation location'}
+              />
+            </Field>
+          )}
         </View>
 
         {/* ---------- Generate ---------- */}
@@ -711,7 +766,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                       <Badge key={day} label={shortDay(day)} icon="calendar-outline" />
                     ))}
                     <Badge
-                      label={`${suggestion.mode} · ${suggestion.location}`}
+                      label={describeConsultation(suggestion.mode, suggestion.location)}
                       icon={suggestion.mode === 'Online' ? 'videocam-outline' : 'location-outline'}
                     />
                   </View>
@@ -795,7 +850,7 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                   {pendingOptions.consultationDurationMinutes}-minute slots · {pendingOptions.minSlotsPerDay}-{pendingOptions.maxSlotsPerDay} per day
                 </Text>
                 <Text style={styles.modalMeta}>
-                  {pendingOptions.preferredMode} · {pendingOptions.preferredLocation}
+                  {describeConsultation(pendingOptions.preferredMode, pendingOptions.preferredLocation)}
                 </Text>
                 <Text style={styles.modalMeta}>
                   Hours: {formatTime(pendingOptions.windowStart)} - {formatTime(pendingOptions.windowEnd)}
@@ -825,6 +880,7 @@ const CARD_RADIUS = 14;
 const CONTROL_RADIUS = 10;
 
 const styles = StyleSheet.create({
+  hintText: { fontSize: 12, color: colors.textMuted, lineHeight: 17, marginTop: 4 },
   safeArea: { flex: 1, backgroundColor: colors.white },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerButton: { width: 36, height: 36, alignItems: 'flex-start', justifyContent: 'center' },

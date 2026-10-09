@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -59,12 +59,19 @@ export default function PersonalInformationScreen({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const update = (field: keyof PersonalInformation) => (value: string) =>
-    setForm((prev) => {
-      const next = { ...prev, [field]: value };
-      onDraftChange?.(next);
-      return next;
-    });
+  // Keeps the latest form so quick typing never works from a stale copy.
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  // Tell the parent about the draft in the event handler, not inside the
+  // setForm updater (that runs during render and causes React's "Cannot update
+  // a component while rendering a different component" error).
+  const update = (field: keyof PersonalInformation) => (value: string) => {
+    const next = { ...formRef.current, [field]: value };
+    formRef.current = next;
+    setForm(next);
+    onDraftChange?.(next);
+  };
 
   // Validates the form, then asks the user to confirm before anything is saved.
   const handleSave = () => {

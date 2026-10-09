@@ -13,6 +13,7 @@ import {
   getSecondsUntilAppointment,
   formatCountdown,
 } from '../data/queue';
+import { splitLocationAndLink } from '../lib/consultationInfo';
 
 type QueueScreenProps = {
   queue: QueueEntry[];
@@ -74,7 +75,10 @@ export default function QueueScreen({
   // instead of letting them run down to, and sit stuck at, "0:00".
   const STARTING_SOON_SECONDS = 5 * 60;
   const isOnlineAppointment = appointmentMode?.trim().toLowerCase() === 'online';
-  const meetingLink = isOnlineAppointment ? appointmentLocation : undefined;
+  // "Both" appointments hold a room and a meeting link in one location text.
+  const bothInfo = !isOnlineAppointment ? splitLocationAndLink(appointmentLocation) : { place: null, link: null };
+  const isBothAppointment = !!bothInfo.place && !!bothInfo.link;
+  const meetingLink = isOnlineAppointment ? appointmentLocation : isBothAppointment ? bothInfo.link ?? undefined : undefined;
   const handleOpenMeetingLink = () => {
     if (!meetingLink) return;
     const url = /^https?:\/\//i.test(meetingLink) ? meetingLink : `https://${meetingLink}`;
@@ -195,6 +199,33 @@ export default function QueueScreen({
           </View>
         ) : hasAppointment ? (
           <>
+            {(isOnlineAppointment || isBothAppointment) && !!meetingLink && (
+              <View style={styles.whereCard}>
+                <Text style={styles.whereTitle}>
+                  {isBothAppointment ? 'Face-to-Face or Online' : 'Online Consultation'}
+                </Text>
+                {isBothAppointment && (
+                  <View style={styles.whereRow}>
+                    <Ionicons name="location-outline" size={16} color={colors.primary} />
+                    <Text style={styles.whereText}>{bothInfo.place}</Text>
+                  </View>
+                )}
+                <View style={styles.whereRow}>
+                  <Ionicons name="videocam-outline" size={16} color={colors.primary} />
+                  <TouchableOpacity style={styles.whereLinkWrap} onPress={handleOpenMeetingLink} activeOpacity={0.7}>
+                    <Text style={styles.whereLink} selectable>
+                      {meetingLink}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {isBothAppointment && (
+                  <Text style={styles.whereHint}>
+                    Your instructor will tell you whether to go to the location or use the link.
+                  </Text>
+                )}
+              </View>
+            )}
+
             {position && (
               <View style={styles.yourQueueCard}>
                 <Text style={styles.yourQueueLabel}>Your Queue Number</Text>
@@ -226,20 +257,29 @@ export default function QueueScreen({
                             : 'Your appointment is starting soon'}
                         </Text>
                         <Text style={styles.startingSoonSubtext}>
-                          {isOnlineAppointment
-                            ? 'Be ready to join the meeting using the link below.'
+                          {isBothAppointment
+                            ? 'Get ready. Your instructor will tell you whether to go to the location or use the link.'
+                            : isOnlineAppointment
+                            ? 'Get ready to join using the meeting link above.'
                             : 'Be ready to head to the room.'}
                         </Text>
-                        {isOnlineAppointment && !!meetingLink && (
-                          <TouchableOpacity onPress={handleOpenMeetingLink} activeOpacity={0.7}>
-                            <Text style={styles.startingSoonLink} selectable>
-                              {meetingLink}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
                       </View>
                     </View>
                   )}
+
+                {isNowServing && myIsStarted && !myAppointmentIsDone && (isOnlineAppointment || isBothAppointment) && (
+                  <View style={styles.startingSoonBox}>
+                    <Ionicons name="videocam-outline" size={16} color={colors.white} />
+                    <View style={styles.startingSoonTextWrap}>
+                      <Text style={styles.startingSoonTitle}>Your appointment is ongoing</Text>
+                      <Text style={styles.startingSoonSubtext}>
+                        {isBothAppointment
+                          ? 'Your instructor will tell you whether to go to the location or use the link above.'
+                          : 'Join using the meeting link above.'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </View>
             )}
             <View style={styles.actionRow}>
@@ -326,6 +366,21 @@ export default function QueueScreen({
 }
 
 const styles = StyleSheet.create({
+  whereCard: {
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    marginBottom: 12,
+    gap: 8,
+  },
+  whereTitle: { fontSize: 13, fontWeight: '800', color: colors.textDark },
+  whereRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  whereText: { flex: 1, fontSize: 13, fontWeight: '600', color: colors.textDark },
+  whereLinkWrap: { flex: 1 },
+  whereLink: { fontSize: 13, fontWeight: '600', color: colors.primary, textDecorationLine: 'underline' },
+  whereHint: { fontSize: 12, color: colors.textMuted, lineHeight: 17 },
   safeArea: {
     flex: 1,
     backgroundColor: colors.white,

@@ -26,6 +26,7 @@ type FacultyProfileMenuScreenProps = {
   email?: string;
   fullDepartment?: string;
   consultationTypes?: string;
+  about?: string;
   photoUri?: string;
   onBack?: () => void;
   onNamePress?: () => void;
@@ -48,6 +49,7 @@ export default function FacultyProfileMenuScreen({
   email = 'juandelacruz@gmail.com',
   fullDepartment = 'Computer Studies Socsiety',
   consultationTypes = 'Face-to-Face   Online',
+  about,
   photoUri,
   onBack,
   onNamePress,
@@ -116,6 +118,12 @@ export default function FacultyProfileMenuScreen({
           <Text style={styles.name}>{name}</Text>
           </TouchableOpacity>
           <Text style={styles.department}>{department}</Text>
+          {!!about?.trim() && (
+            <View style={styles.aboutWrap}>
+              <Text style={styles.aboutLabel}>About</Text>
+              <Text style={styles.aboutText}>{about.trim()}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.infoCard}>
@@ -232,6 +240,16 @@ const styles = StyleSheet.create({
     color: '#E9C7CE',
     marginTop: 2,
   },
+  aboutWrap: {
+    alignSelf: 'stretch',
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+  },
+  aboutLabel: { fontSize: 11, fontWeight: '700', color: '#E9C7CE', letterSpacing: 0.6, textTransform: 'uppercase' },
+  aboutText: { marginTop: 4, fontSize: 13, lineHeight: 19, color: colors.white, textAlign: 'center' },
   infoCard: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
