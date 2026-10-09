@@ -21,7 +21,6 @@ export type FacultyPersonalInformation = {
   email: string;
   fullDepartment: string;
   consultationTypes: string;
-  about: string;
 };
 
 export type PasswordChange = {
@@ -42,7 +41,6 @@ export default function FacultyPersonalInformationScreen({
   email,
   fullDepartment,
   consultationTypes,
-  about,
   employeeId,
   onBack,
   onSave,
@@ -53,7 +51,6 @@ export default function FacultyPersonalInformationScreen({
     email,
     fullDepartment,
     consultationTypes,
-    about,
   });
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -200,17 +197,6 @@ export default function FacultyPersonalInformationScreen({
             onChangeText={update('consultationTypes')}
             placeholder="e.g. Face-to-Face, Online"
             placeholderTextColor={colors.textMuted}
-          />
-
-          <Text style={styles.label}>About</Text>
-          <TextInput
-            style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
-            value={form.about}
-            onChangeText={update('about')}
-            placeholder="Tell students a little about yourself (optional)"
-            placeholderTextColor={colors.textMuted}
-            multiline
-            maxLength={300}
           />
 
           <View style={styles.sectionDivider} />

@@ -670,7 +670,6 @@ function AppContent() {
     email: '',
     fullDepartment: '',
     consultationTypes: 'Face-to-Face   Online',
-    about: '',
     photoUri: undefined,
   });
 
@@ -740,7 +739,6 @@ function AppContent() {
       fullDepartment: faculty?.department ?? '',
       photoUri: profile.avatar_url ?? undefined,
       consultationTypes: faculty?.consultation_types ?? 'Face-to-Face   Online',
-      about: (faculty?.about as string | null | undefined) ?? '',
     });
     setClassScheduleStatus('done');
     setUserRole('faculty');
@@ -1130,7 +1128,6 @@ function AppContent() {
           role_title: string;
           is_available: boolean;
           consultation_types?: string | null;
-          about?: string | null;
           profiles: { full_name: string; avatar_url?: string | null } | { full_name: string; avatar_url?: string | null }[] | null;
         };
         const rows = (data ?? []) as FacultyRow[];
@@ -1145,7 +1142,6 @@ function AppContent() {
               status: row.is_available ? 'available' : 'unavailable',
               photoUri: profile?.avatar_url ?? undefined,
               consultationTypes: row.consultation_types ?? undefined,
-              about: row.about ?? undefined,
             };
           })
         );
@@ -2170,7 +2166,7 @@ function AppContent() {
     const department = data.fullDepartment.trim();
     const { error: facultyError } = await supabase
       .from('faculty')
-      .update({ department, consultation_types: data.consultationTypes, about: data.about.trim() })
+      .update({ department, consultation_types: data.consultationTypes })
       .eq('profile_id', session.user.id);
 
     if (facultyError) throw new Error(facultyError.message);
@@ -2181,7 +2177,6 @@ function AppContent() {
       department,
       fullDepartment: department,
       consultationTypes: data.consultationTypes,
-      about: data.about.trim(),
       email: emailChangePending ? prev.email : data.email.trim(),
     }));
 
@@ -4167,7 +4162,6 @@ function AppContent() {
             facultyStatus={selectedFaculty?.status}
             facultyPhotoUri={selectedFaculty?.photoUri}
             consultationTypes={selectedFaculty?.consultationTypes}
-            about={selectedFaculty?.about}
             loading={scheduleLoading}
             mode={profileMode}
             onBack={() => setScreen(profileMode === 'book' ? 'bookInstructors' : 'directory')}
@@ -4712,7 +4706,6 @@ function AppContent() {
             email={facultyPersonalDraft?.email ?? facultyProfile.email}
             fullDepartment={facultyPersonalDraft?.fullDepartment ?? facultyProfile.fullDepartment}
             consultationTypes={facultyPersonalDraft?.consultationTypes ?? facultyProfile.consultationTypes}
-            about={facultyPersonalDraft?.about ?? facultyProfile.about}
             onDraftChange={setFacultyPersonalDraft}
             onSave={async (data, passwordChange) => {
               try {

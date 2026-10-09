@@ -657,7 +657,6 @@ type PersonalInfo = {
   email: string;
   department: string;
   consultationTypes: string;
-  about: string;
 };
 
 // Same default the mobile app shows when a faculty hasn't set this yet.
@@ -670,7 +669,6 @@ type DbFacultyRow = {
   role_title: string;
   is_available: boolean;
   consultation_types: string | null;
-  about?: string | null;
 };
 
 function ProfileTab({
@@ -694,7 +692,6 @@ function ProfileTab({
     email: session.user.email ?? '',
     department: '',
     consultationTypes: DEFAULT_CONSULTATION_TYPES,
-    about: '',
   });
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
@@ -737,7 +734,6 @@ function ProfileTab({
         department: facultyData?.department ?? '',
         consultationTypes:
           facultyData?.consultation_types ?? DEFAULT_CONSULTATION_TYPES,
-        about: facultyData?.about ?? '',
       };
 
       setSavedInfo(info);
@@ -857,7 +853,6 @@ function ProfileTab({
         department: form.department,
         is_available: formAvailable,
         consultation_types: form.consultationTypes.trim(),
-        about: form.about.trim(),
       })
       .eq('profile_id', facultyId);
 
@@ -987,18 +982,6 @@ function ProfileTab({
               />
             </div>
 
-            <div className="fv-edit-field">
-              <label htmlFor="pi-about">About</label>
-              <textarea
-                id="pi-about"
-                rows={4}
-                maxLength={300}
-                value={form.about}
-                onChange={(event) => updateField('about')(event.target.value)}
-                placeholder="Tell students a little about yourself (optional)"
-              />
-            </div>
-
             <p className="fv-edit-password-hint">
               Want to change your password? That's now in Settings.
             </p>
@@ -1083,15 +1066,6 @@ function ProfileTab({
       </div>
 
       <div className="fv-card">
-        <h2>About</h2>
-        {savedInfo.about.trim() ? (
-          <p className="fv-about-text">{savedInfo.about.trim()}</p>
-        ) : (
-          <p className="fv-about-text fv-about-empty">
-            You haven&apos;t added an About yet. Use Edit above to add one.
-          </p>
-        )}
-
         <h3 className="fv-subheading">Contact Information</h3>
         <div className="fv-contact-row">
           <MailIcon />
