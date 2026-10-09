@@ -191,6 +191,12 @@ type AppointmentsScreenProps = {
   onMenuPress?: () => void;
   onSelectAppointment?: (appointment: Appointment) => void;
   onTabChange?: (tab: TabKey) => void;
+  // The tab and search the student had open. The parent keeps them so coming back
+  // from an appointment's details lands on the same tab (Completed, Canceled...).
+  initialFilter?: 'upcoming' | 'completed' | 'canceled';
+  initialSearch?: string;
+  onFilterChange?: (filter: 'upcoming' | 'completed' | 'canceled') => void;
+  onSearchChange?: (query: string) => void;
 };
 
 export default function AppointmentsScreen({
@@ -198,10 +204,22 @@ export default function AppointmentsScreen({
   onMenuPress,
   onSelectAppointment,
   onTabChange,
+  initialFilter = 'upcoming',
+  initialSearch = '',
+  onFilterChange,
+  onSearchChange,
 }: AppointmentsScreenProps) {
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('upcoming');
+  const [activeFilter, setActiveFilterState] = useState<FilterKey>(initialFilter);
+  const setActiveFilter = (key: FilterKey) => {
+    setActiveFilterState(key);
+    onFilterChange?.(key as 'upcoming' | 'completed' | 'canceled');
+  };
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQueryState] = useState(initialSearch);
+  const setSearchQuery = (value: string) => {
+    setSearchQueryState(value);
+    onSearchChange?.(value);
+  };
   const normRef = (v?: string) => (v ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
   const query = normRef(searchQuery);
   // While searching, look through ALL of the student's appointments by

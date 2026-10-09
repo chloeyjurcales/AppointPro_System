@@ -29,6 +29,12 @@ type BookInstructorScreenProps = {
   onBack?: () => void;
   onSelectFaculty?: (faculty: FacultyMember) => void;
   onTabChange?: (tab: TabKey) => void;
+  // The department and search the student had chosen. The parent keeps them so
+  // coming back from an instructor's profile doesn't make the student start over.
+  initialDepartment?: string | null;
+  initialQuery?: string;
+  onDepartmentChange?: (department: string | null) => void;
+  onQueryChange?: (query: string) => void;
 };
 
 /**
@@ -42,10 +48,22 @@ export default function BookInstructorScreen({
   onBack,
   onSelectFaculty,
   onTabChange,
+  initialDepartment = null,
+  initialQuery = '',
+  onDepartmentChange,
+  onQueryChange,
 }: BookInstructorScreenProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQueryState] = useState(initialQuery);
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    onQueryChange?.(value);
+  };
   // The student picks a department first; only then are its instructors shown.
-  const [selectedDept, setSelectedDept] = useState<string | null>(null);
+  const [selectedDept, setSelectedDeptState] = useState<string | null>(initialDepartment);
+  const setSelectedDept = (value: string | null) => {
+    setSelectedDeptState(value);
+    onDepartmentChange?.(value);
+  };
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const needle = query.trim().toLowerCase();

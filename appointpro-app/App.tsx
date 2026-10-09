@@ -1090,6 +1090,13 @@ function AppContent() {
   const [profileMode, setProfileMode] = useState<'view' | 'book'>('view');
   // Screen the + button was pressed on, so Back returns there.
   const [bookInstructorsReturn, setBookInstructorsReturn] = useState<Screen>('home');
+  // Department and search chosen on the "+" booking screen, kept so the student returns
+  // to the same list after opening an instructor's profile.
+  // Tab and search open on "My Appointments", kept when the student opens an appointment and comes back.
+  const [appointmentsFilter, setAppointmentsFilter] = useState<'upcoming' | 'completed' | 'canceled'>('upcoming');
+  const [appointmentsSearch, setAppointmentsSearch] = useState('');
+  const [bookDepartment, setBookDepartment] = useState<string | null>(null);
+  const [bookSearch, setBookSearch] = useState('');
   // Every instructor can be booked. The student's own department is listed
   // first, then everyone else alphabetically.
   const bookableFaculty = [...facultyDirectory].sort((a, b) => {
@@ -2056,6 +2063,10 @@ function AppContent() {
         setScreen('directory');
         break;
       case 'appointments':
+        // Tapping the tab opens it fresh on Upcoming; going back from an
+        // appointment's details keeps the tab the student was on.
+        setAppointmentsFilter('upcoming');
+        setAppointmentsSearch('');
         setScreen('appointments');
         break;
       case 'notifications':
@@ -4118,6 +4129,10 @@ function AppContent() {
             faculty={bookableFaculty}
             studentDepartment={studentProfile.department}
             loading={facultyDirectoryLoading}
+            initialDepartment={bookDepartment}
+            initialQuery={bookSearch}
+            onDepartmentChange={setBookDepartment}
+            onQueryChange={setBookSearch}
             onBack={() => setScreen(bookInstructorsReturn)}
             onSelectFaculty={(faculty) => {
               setProfileMode('book');
@@ -4435,6 +4450,10 @@ function AppContent() {
         {screen === 'appointments' && (
           <AppointmentsScreen
             appointments={studentAppointments}
+            initialFilter={appointmentsFilter}
+            initialSearch={appointmentsSearch}
+            onFilterChange={setAppointmentsFilter}
+            onSearchChange={setAppointmentsSearch}
             onSelectAppointment={(appointment) => {
               setSelectedAppointmentId(appointment.id);
               setScreen('appointmentDetails');
@@ -4569,7 +4588,6 @@ function AppContent() {
             slotsByDate={facultySlotsByDate}
             recurringRules={recurringRules}
             onBack={() => setScreen('facultyHome')}
-            onInfoPress={() => showToast('Availability info coming soon')}
             onAddTimeSlot={handleAddTimeSlot}
             onToggleSlot={handleToggleFacultySlot}
             onDeleteTimeSlot={handleDeleteFacultySlot}
@@ -4857,6 +4875,10 @@ function AppContent() {
             bottomOffset={62}
             onPress={() => {
               setQueueViewFacultyId(null);
+              // A fresh tap on "+" starts the choice over; only coming back from a
+              // faculty profile keeps the department the student picked.
+              setBookDepartment(null);
+              setBookSearch('');
               setBookInstructorsReturn(screen);
               setScreen('bookInstructors');
             }}

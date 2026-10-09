@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -80,23 +79,8 @@ export default function NotificationsScreen({
   };
 
   const handleDeleteSelected = () => {
-    const count = selectedIds.size;
-    if (count === 0) return;
-    Alert.alert(
-      count === 1 ? 'Delete this notification?' : `Delete ${count} notifications?`,
-      'This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, Delete',
-          style: 'destructive',
-          onPress: () => {
-            onDeleteNotifications?.(Array.from(selectedIds));
-            exitSelectMode();
-          },
-        },
-      ]
-    );
+    onDeleteNotifications?.(Array.from(selectedIds));
+    exitSelectMode();
   };
 
   const handleRowPress = (item: NotificationItem) => {
@@ -198,7 +182,7 @@ export default function NotificationsScreen({
               )}
               <View style={styles.textWrap}>
                 <View style={styles.titleRow}>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
+                  <Text style={[styles.itemTitle, { flexShrink: 1 }]} numberOfLines={1}>{item.title}</Text>
                   {!item.read && <View style={styles.unreadDot} />}
                 </View>
                 {!!item.senderName && (
@@ -206,7 +190,7 @@ export default function NotificationsScreen({
                     {[item.senderName, item.senderRole, item.senderDepartment].filter(Boolean).join(' · ')}
                   </Text>
                 )}
-                <Text style={styles.itemDesc}>{item.description}</Text>
+                <Text style={styles.itemDesc} numberOfLines={1}>{item.description}</Text>
               </View>
               <Text style={styles.itemTime}>{item.time}</Text>
               {!selectMode && (
@@ -299,8 +283,8 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: spacing.md,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -80,23 +79,8 @@ export default function FacultyNotificationsScreen({
   };
 
   const handleDeleteSelected = () => {
-    const count = selectedIds.size;
-    if (count === 0) return;
-    Alert.alert(
-      count === 1 ? 'Delete this notification?' : `Delete ${count} notifications?`,
-      'This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, Delete',
-          style: 'destructive',
-          onPress: () => {
-            onDeleteNotifications?.(Array.from(selectedIds));
-            exitSelectMode();
-          },
-        },
-      ]
-    );
+    onDeleteNotifications?.(Array.from(selectedIds));
+    exitSelectMode();
   };
 
   const handleRowPress = (item: NotificationItem) => {
@@ -218,13 +202,13 @@ export default function FacultyNotificationsScreen({
                 />
               )}
               <View style={styles.textWrap}>
-                <Text style={styles.itemTitle}>{item.title}</Text>
+                <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
                 {!!item.senderName && (
                   <Text style={styles.itemSender} numberOfLines={1}>
                     {[item.senderName, item.senderRole, item.senderDepartment].filter(Boolean).join(' · ')}
                   </Text>
                 )}
-                <Text style={styles.itemDesc}>{item.description}</Text>
+                <Text style={styles.itemDesc} numberOfLines={1}>{item.description}</Text>
               </View>
               <Text style={styles.itemTime}>{item.time}</Text>
             </TouchableOpacity>
@@ -314,8 +298,8 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: spacing.md,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
     borderRadius: 8,
   },

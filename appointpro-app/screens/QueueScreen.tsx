@@ -41,6 +41,8 @@ type QueueScreenProps = {
   // Faculty-only: marks the student at the front of the line as done
   // (whether they finished early or on time) and calls the next student.
   onCompleteCurrent?: () => void;
+  // Faculty only: mark the student at the front as a no-show and move on.
+  onSkipCurrent?: () => void;
   onTabChange?: (tab: TabKey) => void;
   onFacultyTabChange?: (tab: FacultyTabKey) => void;
 };
@@ -60,6 +62,7 @@ export default function QueueScreen({
   onReschedule,
   onCancelAppointment,
   onCompleteCurrent,
+  onSkipCurrent,
   onTabChange,
   onFacultyTabChange,
 }: QueueScreenProps) {
@@ -190,6 +193,12 @@ export default function QueueScreen({
                   >
                     <Ionicons name="checkmark-circle-outline" size={16} color={colors.white} />
                     <Text style={styles.doneButtonText}>{nowServingIsDone ? 'Complete — Call Next' : 'Done — Call Next'}</Text>
+                  </TouchableOpacity>
+                )}
+                {!!onSkipCurrent && (
+                  <TouchableOpacity style={styles.skipButton} onPress={onSkipCurrent} activeOpacity={0.85}>
+                    <Ionicons name="person-remove-outline" size={16} color={colors.danger} />
+                    <Text style={styles.skipButtonText}>Skip — No Show</Text>
                   </TouchableOpacity>
                 )}
               </>
@@ -580,6 +589,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
   },
+  skipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: 8,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    marginTop: spacing.sm,
+  },
+  skipButtonText: { color: colors.danger, fontSize: 13, fontWeight: '700' },
   doneButtonText: {
     color: colors.white,
     fontSize: 13,
