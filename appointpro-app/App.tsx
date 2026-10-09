@@ -3912,6 +3912,20 @@ function AppContent() {
               }
               return true;
             }}
+            onVerifyCode={async (email, code) => {
+              // The email carries a code, so no link or deep link is needed.
+              const { data, error } = await supabase.auth.verifyOtp({
+                email,
+                token: code.trim(),
+                type: 'recovery',
+              });
+              if (error || !data.session) {
+                showToast('That code is invalid or has expired. Please try again or request a new one.');
+                return false;
+              }
+              setScreen('resetPassword');
+              return true;
+            }}
           />
         )}
 

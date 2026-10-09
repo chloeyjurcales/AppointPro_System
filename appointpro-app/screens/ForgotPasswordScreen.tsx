@@ -7,25 +7,33 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import AuthInput from '../components/AuthInput';
+import { OTP_LENGTH } from './VerifyEmailScreen';
 
 type ForgotPasswordScreenProps = {
   onBack?: () => void;
   onBackToLogin?: () => void;
   onSendResetLink?: (email: string) => void | boolean | Promise<void | boolean>;
+  // Checks the code from the email. Return true when it was accepted (the parent then
+  // opens the new-password screen).
+  onVerifyCode?: (email: string, code: string) => boolean | Promise<boolean>;
 };
 
 export default function ForgotPasswordScreen({
   onBack,
   onBackToLogin,
   onSendResetLink,
+  onVerifyCode,
 }: ForgotPasswordScreenProps) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [code, setCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
   const canSubmit = email.trim().length > 0;
 
@@ -41,6 +49,17 @@ export default function ForgotPasswordScreen({
       if (result !== false) setSent(true);
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleVerify = async () => {
+    if (code.length !== OTP_LENGTH || verifying) return;
+    setVerifying(true);
+    try {
+      const ok = await onVerifyCode?.(email.trim(), code);
+      if (ok === false) setCode('');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -72,23 +91,47 @@ export default function ForgotPasswordScreen({
             <>
               <Text style={styles.heading}>Check Your Email</Text>
               <Text style={styles.subheading}>
-                We've sent a password reset link to{'\n'}
-                <Text style={styles.emailHighlight}>{email.trim()}</Text>. Follow the
-                instructions there to set a new password.
+                We sent a {OTP_LENGTH}-digit code to{'\n'}
+                <Text style={styles.emailHighlight}>{email.trim()}</Text>.{'\n'}Enter it below to set a new
+                password.
               </Text>
 
+              <Text style={styles.label}>Verification Code</Text>
+              <View style={styles.codeBox}>
+                <TextInput
+                  style={styles.codeInput}
+                  value={code}
+                  onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, OTP_LENGTH))}
+                  keyboardType="number-pad"
+                  placeholder={'•'.repeat(OTP_LENGTH)}
+                  placeholderTextColor="#9B9B9B"
+                  maxLength={OTP_LENGTH}
+                  textContentType="oneTimeCode"
+                  autoComplete="one-time-code"
+                  autoCorrect={false}
+                  autoFocus
+                  editable={!verifying}
+                />
+              </View>
+
               <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={onBackToLogin ?? onBack}
+                style={[styles.primaryButton, (code.length !== OTP_LENGTH || verifying) && styles.primaryButtonDisabled]}
+                onPress={handleVerify}
                 activeOpacity={0.85}
+                disabled={code.length !== OTP_LENGTH || verifying}
               >
-                <Text style={styles.primaryButtonText}>Back to Login</Text>
+                <Text style={styles.primaryButtonText}>{verifying ? 'Checking…' : 'Verify Code'}</Text>
               </TouchableOpacity>
 
               <View style={styles.footerRow}>
                 <Text style={styles.footerText}>Didn't get the email? </Text>
                 <TouchableOpacity onPress={handleSend}>
-                  <Text style={styles.link}>Resend link</Text>
+                  <Text style={styles.link}>Resend code</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.footerRow, { marginTop: spacing.sm }]}>
+                <TouchableOpacity onPress={onBackToLogin ?? onBack}>
+                  <Text style={styles.link}>Back to Login</Text>
                 </TouchableOpacity>
               </View>
             </>
@@ -97,7 +140,7 @@ export default function ForgotPasswordScreen({
               <Text style={styles.heading}>Forgot Password?</Text>
               <Text style={styles.subheading}>
                 Enter the email address linked to your account and we'll send you a
-                link to reset your password.
+                code to reset your password.
               </Text>
 
               <Text style={styles.label}>Email</Text>
@@ -116,7 +159,7 @@ export default function ForgotPasswordScreen({
                 disabled={!canSubmit || sending}
               >
                 <Text style={styles.primaryButtonText}>
-                  {sending ? 'Sending…' : 'Send Reset Link'}
+                  {sending ? 'Sending…' : 'Send Reset Code'}
                 </Text>
               </TouchableOpacity>
 
@@ -135,6 +178,20 @@ export default function ForgotPasswordScreen({
 }
 
 const styles = StyleSheet.create({
+  codeBox: {
+    backgroundColor: colors.inputBackground,
+    borderRadius: 10,
+    height: 56,
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  codeInput: {
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: 8,
+    textAlign: 'center',
+    color: colors.textDark,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
