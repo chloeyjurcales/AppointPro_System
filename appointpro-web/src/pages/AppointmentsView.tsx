@@ -290,9 +290,7 @@ type AppointmentsViewProps = {
   facultyName: string;
 };
 
-// Asks the validate-cancel-reason edge function (AI) whether a faculty member's
-// cancellation reason is genuine. If the service can't be reached, a basic
-// offline check is used so faculty aren't blocked when the service is down.
+
 async function validateFacultyCancelReason(reason: string): Promise<{ valid: boolean; message: string }> {
   const text = reason.trim().slice(0, 300);
   const letters = (text.match(/\p{L}/gu) ?? []).length;

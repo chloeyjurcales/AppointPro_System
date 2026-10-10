@@ -361,7 +361,7 @@ export default function StudentScheduleOnboardingScreen({
                       placeholder="e.g. IT 101 or Programming 1"
                       placeholderTextColor={colors.textMuted}
                       style={styles.input}
-                      autoCapitalize="characters"
+                      autoCapitalize="none"
                       autoCorrect={false}
                       accessibilityLabel="Subject code or name"
                     />

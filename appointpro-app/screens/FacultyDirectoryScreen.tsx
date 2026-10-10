@@ -247,14 +247,21 @@ type ScheduleGroup = {
   items: StudentAppointment[];
 };
 
+// One key per consultation schedule (availability slot). Appointments with
+// no slot fall back to date + mode + location. Queue numbers restart at 1
+// inside each of these.
+function getScheduleKey(item: StudentAppointment): string {
+  const where = item.mode === 'online' ? item.meetingLink ?? '' : item.room ?? '';
+  return item.slotId ?? `${item.dateKey ?? item.date}|${item.mode}|${where}`;
+}
+
 // Groups appointments under the consultation schedule (availability slot)
 // they were booked into. Appointments with no slot fall back to being
 // grouped by date + mode + location.
 function buildScheduleGroups(items: StudentAppointment[]): ScheduleGroup[] {
   const map = new Map<string, ScheduleGroup>();
   items.forEach((item) => {
-    const where = item.mode === 'online' ? item.meetingLink ?? '' : item.room ?? '';
-    const key = item.slotId ?? `${item.dateKey ?? item.date}|${item.mode}|${where}`;
+    const key = getScheduleKey(item);
     let group = map.get(key);
     if (!group) {
       group = {
@@ -324,18 +331,20 @@ export default function FacultyDirectoryScreen({
     return appointment.status === activeFilter;
   });
 
-  // Queue number = a student's place in that day's line, ordered by
-  // scheduled appointment time (the same order the live Queue uses).
-  // Only approved upcoming appointments and completed ones count; pending
-  // and cancelled appointments have no queue spot.
+  // Queue number = a student's place in line within ONE schedule (time
+  // window), ordered by appointment time. Every schedule starts at 1, so
+  // 9-10 AM and 3-5 PM each have their own #1, #2, ... Only approved
+  // upcoming and completed appointments count; pending and cancelled ones
+  // have no queue spot.
   const queueNumbers = new Map<string, number>();
-  const byDate = new Map<string, StudentAppointment[]>();
+  const bySchedule = new Map<string, StudentAppointment[]>();
   source.forEach((a) => {
     const inLine = (a.status === 'upcoming' && isFullyApproved(a)) || a.status === 'completed';
     if (!inLine || !a.dateKey) return;
-    byDate.set(a.dateKey, [...(byDate.get(a.dateKey) ?? []), a]);
+    const key = getScheduleKey(a);
+    bySchedule.set(key, [...(bySchedule.get(key) ?? []), a]);
   });
-  byDate.forEach((list) => {
+  bySchedule.forEach((list) => {
     [...list]
       .sort((x, y) => (x.startTime24 ?? '').localeCompare(y.startTime24 ?? '') || x.id.localeCompare(y.id))
       .forEach((a, index) => queueNumbers.set(a.id, index + 1));

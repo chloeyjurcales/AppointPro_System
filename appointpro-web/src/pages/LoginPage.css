@@ -224,6 +224,9 @@
   flex-direction: column;
 }
 
+
+
+
 .lp-field {
   display: flex;
   flex-direction: column;
@@ -252,6 +255,8 @@
     background var(--duration-fast, 0.15s) var(--ease-standard, ease),
     box-shadow var(--duration-fast, 0.15s) var(--ease-standard, ease);
 }
+
+
 
 .lp-input::placeholder {
   color: #9b9b9b;

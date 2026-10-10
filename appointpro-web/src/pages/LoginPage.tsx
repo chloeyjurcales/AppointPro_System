@@ -146,7 +146,7 @@ export default function LoginPage({
             <p className="lp-form-tagline">
               Smart Faculty Consultation Scheduling
               <br />
-              with <strong>Slatiq AI.</strong>
+              with <strong>SlotIQ AI.</strong>
             </p>
 
             <h1 className="lp-heading">Welcome!</h1>
