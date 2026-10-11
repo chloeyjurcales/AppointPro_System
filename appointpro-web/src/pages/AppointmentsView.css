@@ -568,6 +568,16 @@
   color: #ffffff;
 }
 
+.av-row-btn-reschedule {
+  background: var(--color-primary-bg, #f6e8ec);
+  color: var(--color-primary, #7a0e2c);
+}
+
+.av-row-btn-reschedule:hover {
+  background: var(--color-primary, #7a0e2c);
+  color: #ffffff;
+}
+
 .av-row-btn-approve {
   background: var(--color-success-bg, #e4f6eb);
   color: var(--color-success, #1f9d55);

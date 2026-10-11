@@ -509,6 +509,24 @@ export default function AppointmentsView({
     setModal({ type: 'details', appointment });
   };
 
+  const openCancel = (appointment: Appointment) => {
+    setCancelReason('');
+    setCancelReasonError(null);
+    setCancelChecking(false);
+    setModal({ type: 'cancel', appointment });
+  };
+
+  const openReschedule = (appointment: Appointment) => {
+    setRescheduleDate('');
+    setRescheduleStart('');
+    setRescheduleEnd('');
+    setRescheduleReason('');
+    setRescheduleMode(appointment.mode);
+    setRescheduleLocation(appointment.mode === 'Online' ? '' : appointment.location);
+    setRescheduleMeetingLink(appointment.mode === 'Online' ? appointment.location : '');
+    setModal({ type: 'reschedule', appointment });
+  };
+
   const openDecline = (appointment: Appointment) => {
     setDeclineReason('');
     setModal({ type: 'decline', appointment });
@@ -1065,6 +1083,25 @@ export default function AppointmentsView({
                         onClick={() => openDecline(appt)}
                       >
                         Decline
+                      </button>
+                    </div>
+                  ) : appt.status === 'Upcoming' ? (
+                    <div className="av-actions">
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-reschedule"
+                        disabled={actionBusy}
+                        onClick={() => openReschedule(appt)}
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-danger"
+                        disabled={actionBusy}
+                        onClick={() => openCancel(appt)}
+                      >
+                        Cancel
                       </button>
                     </div>
                   ) : (
