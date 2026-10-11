@@ -14,11 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../theme';
 import FacultyBottomTabBar, { FacultyTabKey } from '../components/FacultyBottomTabBar';
-import { ConsultationMode } from '../data/facultySlots';
+import { ConsultationMode, DAY_NAMES, toDateKey } from '../data/facultySlots';
 
 type Period = 'AM' | 'PM';
 
 export type NewFacultySlotInput = {
+  dateKey: string; // YYYY-MM-DD of the day this slot is for
   startHour: string;
   startMinute: string;
   startPeriod: Period;
@@ -31,6 +32,7 @@ export type NewFacultySlotInput = {
 };
 
 type AddTimeSlotScreenProps = {
+  initialDateKey?: string;
   onBack?: () => void;
   onConfirm?: (slot: NewFacultySlotInput) => void;
   onTabChange?: (tab: FacultyTabKey) => void;
@@ -61,7 +63,41 @@ function toMinutesSinceMidnight(
   return hour24 * 60 + minuteNum;
 }
 
+const DAYS_AHEAD = 60;
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+type DayOption = { dateKey: string; dayName: string; dayNum: number; month: string; isToday: boolean };
+
+function buildDayOptions(initialDateKey?: string): DayOption[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayKey = toDateKey(today);
+  const toOption = (d: Date): DayOption => ({
+    dateKey: toDateKey(d),
+    dayName: DAY_NAMES[d.getDay()],
+    dayNum: d.getDate(),
+    month: MONTH_NAMES[d.getMonth()],
+    isToday: toDateKey(d) === todayKey,
+  });
+  const options: DayOption[] = [];
+  for (let i = 0; i < DAYS_AHEAD; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    options.push(toOption(d));
+  }
+  // Keep a pre-selected date that falls outside the window selectable.
+  if (initialDateKey && !options.some((o) => o.dateKey === initialDateKey)) {
+    const d = new Date(`${initialDateKey}T00:00:00`);
+    if (!Number.isNaN(d.getTime())) {
+      options.push(toOption(d));
+      options.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    }
+  }
+  return options;
+}
+
 export default function AddTimeSlotScreen({
+  initialDateKey,
   onBack,
   onConfirm,
   onTabChange,
@@ -69,6 +105,13 @@ export default function AddTimeSlotScreen({
   // Defaults to a valid 10:00 AM - 12:00 PM range (previously defaulted
   // to 10:00 PM - 12:30 PM, which is an end-before-start range and would
   // have produced a negative total_minutes if confirmed untouched).
+  const dayOptions = useMemo(() => buildDayOptions(initialDateKey), [initialDateKey]);
+  const [dateKey, setDateKey] = useState<string>(
+    initialDateKey && dayOptions.some((o) => o.dateKey === initialDateKey)
+      ? initialDateKey
+      : dayOptions[0].dateKey
+  );
+  const selectedDay = dayOptions.find((o) => o.dateKey === dateKey);
   const [startHour, setStartHour] = useState('10');
   const [startMinute, setStartMinute] = useState('00');
   const [startPeriod, setStartPeriod] = useState<Period>('AM');
@@ -108,6 +151,7 @@ export default function AddTimeSlotScreen({
   const handleConfirm = () => {
     if (!canConfirm) return;
     onConfirm?.({
+      dateKey,
       startHour,
       startMinute,
       startPeriod,
@@ -138,6 +182,46 @@ export default function AddTimeSlotScreen({
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Set New Time Slot</Text>
+
+          <View style={styles.dayBlock}>
+            <Text style={styles.fieldLabel}>Day:</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.dayScroll}
+            >
+              {dayOptions.map((opt) => {
+                const active = opt.dateKey === dateKey;
+                return (
+                  <TouchableOpacity
+                    key={opt.dateKey}
+                    style={[styles.dayChip, active && styles.dayChipActive]}
+                    onPress={() => setDateKey(opt.dateKey)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${opt.dayName} ${opt.month} ${opt.dayNum}`}
+                  >
+                    <Text style={[styles.dayChipName, active && styles.dayChipTextActive]}>
+                      {opt.isToday ? 'Today' : opt.dayName}
+                    </Text>
+                    <Text style={[styles.dayChipNum, active && styles.dayChipTextActive]}>{opt.dayNum}</Text>
+                    <Text style={[styles.dayChipMonth, active && styles.dayChipTextActive]}>{opt.month}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {selectedDay && (
+              <Text style={styles.dayHint}>
+                {new Date(`${selectedDay.dateKey}T00:00:00`).toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </Text>
+            )}
+          </View>
 
           <View style={styles.timeRow}>
             <Text style={styles.fieldLabel}>Hour:</Text>
@@ -290,7 +374,7 @@ export default function AddTimeSlotScreen({
             <View style={styles.recurringTextWrap}>
               <Text style={styles.fieldLabel}>Repeat Weekly</Text>
               <Text style={styles.recurringHint}>
-                This slot will automatically repeat every week for the semester.
+                This slot will automatically repeat every {selectedDay ? new Date(`${selectedDay.dateKey}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' }) : 'week'} for the semester.
               </Text>
             </View>
             <Switch
@@ -358,6 +442,48 @@ const styles = StyleSheet.create({
     color: colors.textDark,
     textAlign: 'center',
     marginBottom: spacing.lg,
+  },
+  dayBlock: {
+    marginBottom: spacing.lg,
+  },
+  dayScroll: {
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  dayChip: {
+    width: 60,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+  },
+  dayChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  dayChipName: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  dayChipNum: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textDark,
+    marginVertical: 2,
+  },
+  dayChipMonth: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  dayChipTextActive: {
+    color: colors.white,
+  },
+  dayHint: {
+    fontSize: 11,
+    color: colors.textMuted,
   },
   timeRow: {
     flexDirection: 'row',

@@ -655,7 +655,14 @@ export default function SlotIQScreen({ onBack, onApprove, onTabChange }: Props) 
                       size={18}
                       color={active ? colors.primary : colors.textMuted}
                     />
-                    <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{item}</Text>
+                    <Text
+                      style={[styles.choiceText, active && styles.choiceTextActive]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                    >
+                      {item}
+                    </Text>
                   </Pressable>
                 );
               })}
@@ -972,9 +979,9 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: '700', color: colors.textMuted },
   chipTextActive: { color: colors.primary },
   choiceRow: { flexDirection: 'row', gap: 8 },
-  choice: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: CONTROL_RADIUS, paddingVertical: 12, backgroundColor: colors.white },
+  choice: { flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderColor: colors.border, borderRadius: CONTROL_RADIUS, paddingVertical: 10, paddingHorizontal: 4, backgroundColor: colors.white },
   choiceActive: { borderColor: colors.primary, backgroundColor: colors.infoBg },
-  choiceText: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
+  choiceText: { fontSize: 13, fontWeight: '700', color: colors.textMuted, textAlign: 'center' },
   choiceTextActive: { color: colors.primary },
 
   // Buttons: primary = filled, secondary = outlined

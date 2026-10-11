@@ -2346,7 +2346,7 @@ function AppContent() {
     const endTime = to24hTime(data.endHour, data.endMinute, data.endPeriod);
 
     // Overlapping slots would let the same minutes be booked twice.
-    const overlapsExisting = (facultySlotsByDate[addSlotForDate] ?? []).some((s) => {
+    const overlapsExisting = (facultySlotsByDate[data.dateKey] ?? []).some((s) => {
       const [a, b] = s.label.split(' - ');
       return timeRangesOverlap(labelTo24h(a), labelTo24h(b), startTime, endTime);
     });
@@ -2358,7 +2358,7 @@ function AppContent() {
     // "Repeat Weekly" (on by default) promises the slot repeats every week for the
     // semester, but this used to be ignored and only a single slot was saved.
     if (data.recurring) {
-      const firstDay = new Date(`${addSlotForDate}T00:00:00`);
+      const firstDay = new Date(`${data.dateKey}T00:00:00`);
       const lastDay = new Date(firstDay);
       lastDay.setDate(firstDay.getDate() + 16 * 7 - 1);
       await handleCreateRecurringRule({
@@ -2372,7 +2372,7 @@ function AppContent() {
         endPeriod: data.endPeriod,
         mode: data.mode,
         location: data.location,
-        createdDateKey: addSlotForDate,
+        createdDateKey: data.dateKey,
         semesterEndDateKey: toDateKey(lastDay),
       });
       return;
@@ -2382,7 +2382,7 @@ function AppContent() {
       .from('availability_slots')
       .insert({
         faculty_id: session.user.id,
-        date: addSlotForDate,
+        date: data.dateKey,
         start_time: startTime,
         end_time: endTime,
         mode: data.mode,
@@ -2400,7 +2400,7 @@ function AppContent() {
     const newSlot = mapAvailabilitySlotRow(inserted as AvailabilitySlotRow);
     setFacultySlotsByDate((prev) => ({
       ...prev,
-      [addSlotForDate]: [...(prev[addSlotForDate] ?? []), newSlot],
+      [data.dateKey]: [...(prev[data.dateKey] ?? []), newSlot],
     }));
     setScreen('facultyAvailability');
   };
@@ -4623,6 +4623,7 @@ function AppContent() {
 
         {screen === 'addTimeSlot' && (
           <AddTimeSlotScreen
+            initialDateKey={addSlotForDate}
             onBack={() => setScreen(scheduleFormReturn)}
             onConfirm={handleConfirmNewFacultySlot}
             onTabChange={handleFacultyTabChange}
