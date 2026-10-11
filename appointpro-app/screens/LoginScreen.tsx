@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '600',    
     color: colors.tabInactiveText,
   },
   tabTextActive: {
@@ -263,4 +263,5 @@ const styles = StyleSheet.create({
     color: colors.link,
     fontWeight: '700',
   },
+
 });

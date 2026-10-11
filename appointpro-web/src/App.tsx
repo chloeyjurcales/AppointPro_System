@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import LoginPage from './pages/LoginPage'
@@ -12,6 +12,13 @@ function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
   const [authView, setAuthView] = useState<AuthView>('login')
+  // Mirrors authView for the auth listener below. A SIGNED_IN event while the
+  // sign-up page is open can only come from verifying the email code, and that
+  // must NOT log the user in: they have to sign in themselves afterwards.
+  const authViewRef = useRef<AuthView>('login')
+  useEffect(() => {
+    authViewRef.current = authView
+  }, [authView])
   // True while the user is setting a new password after opening the reset link
   // from their email. Checked from the URL up front because Supabase clears the
   // link's hash once it has read it.
@@ -19,6 +26,7 @@ function App() {
     () => /type=recovery/.test(window.location.hash),
   )
   const [resetNotice, setResetNotice] = useState(false)
+  const [verifiedNotice, setVerifiedNotice] = useState(false)
 
   useEffect(() => {
     // Restore an existing session on page load/refresh...
@@ -39,6 +47,7 @@ function App() {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (event, newSession) => {
         if (event === 'PASSWORD_RECOVERY') setRecovering(true)
+        if (newSession && authViewRef.current === 'signup') return
         setSession(newSession)
       },
     )
@@ -89,9 +98,11 @@ function App() {
       <FacultySignUpPage
         onLogin={() => setAuthView('login')}
         onSuccess={() => {
-          // Sign-up succeeded; FacultySignUpPage shows its own "check your
-          // email" confirmation screen and its "Go to Log in" button calls
-          // onLogin above, so there's nothing extra to do here.
+          // Email verified (the page already signed the temporary session
+          // out): send them to the login page to sign in themselves.
+          setSession(null)
+          setAuthView('login')
+          setVerifiedNotice(true)
         }}
       />
     )
@@ -99,6 +110,20 @@ function App() {
 
   return (
     <>
+    {verifiedNotice && (
+      <div
+        role="status"
+        style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          background: '#1E8E3E', color: '#fff', padding: '10px 18px',
+          borderRadius: 10, fontSize: 14, fontWeight: 600, zIndex: 1000,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+        }}
+        onClick={() => setVerifiedNotice(false)}
+      >
+        Email verified! Please log in with your email and password.
+      </div>
+    )}
     {resetNotice && (
       <div
         role="status"

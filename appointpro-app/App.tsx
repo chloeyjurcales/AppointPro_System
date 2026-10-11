@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -30,6 +31,14 @@ import {
 import { colors, spacing } from './theme';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// Dev-only helper (web): Alt/Option + click an element to jump to its source.
+// Loaded with require() so it never gets bundled into the native iOS/Android app.
+const ClickToComponent: React.ComponentType | null =
+  __DEV__ && Platform.OS === 'web'
+    ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('click-to-react-component').ClickToComponent
+    : null;
 import LoginScreen from './screens/LoginScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
@@ -5025,6 +5034,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
+      {ClickToComponent ? <ClickToComponent /> : null}
       <AppContent />
     </SafeAreaProvider>
   );

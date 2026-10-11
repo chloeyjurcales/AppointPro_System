@@ -26,13 +26,11 @@ export default function AboutScreen({ onBack, version = '1.0.0' }: AboutScreenPr
           <Logo size="small" />
           <Text style={styles.versionText}>Version {version}</Text>
         </View>
-
         <Text style={styles.description}>
           AppointmentPro helps students book and manage faculty consultations,
           and gives faculty a simple way to publish their availability and
           handle appointment requests — powered by SlotIQ AI.
         </Text>
-
         <Text style={styles.footerText}>© 2026 AppointmentPro. All rights reserved.</Text>
       </ScrollView>
     </SafeAreaView>

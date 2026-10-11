@@ -172,8 +172,9 @@ export default function FacultySignUpPage({
         return;
       }
 
-      // Email confirmed and signed in — App.tsx's onAuthStateChange now
-      // swaps this page for the Dashboard.
+      // Email confirmed. Verifying also creates a session, but the user must
+      // log in themselves, so sign out and send them to the login page.
+      await supabase.auth.signOut();
       onSuccess?.();
     } catch (err) {
       setError('Something went wrong. Please try again.');
