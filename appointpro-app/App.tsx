@@ -3131,7 +3131,7 @@ function AppContent() {
     }
   };
 
-  const handleFacultyDecline = async (appointment: StudentAppointment) => {
+  const handleFacultyDecline = async (appointment: StudentAppointment, reason?: string) => {
     if (!session || userRole !== 'faculty' || actionInFlightRef.current) return;
     if (appointment.facultyApprovalStatus !== 'pending') {
       showToast('This appointment is no longer awaiting faculty approval.');
@@ -3187,7 +3187,8 @@ function AppContent() {
               end24: appointment.endTime24,
               dateLabel: appointment.date,
               timeLabel: appointment.time,
-            })
+            }),
+            reason
           )
         );
       }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import {
+  approvedMessage,
   canceledMessage,
   declinedMessage,
   formatWhen,
@@ -508,6 +509,78 @@ export default function AppointmentsView({
     setModal({ type: 'details', appointment });
   };
 
+  const openDecline = (appointment: Appointment) => {
+    setDeclineReason('');
+    setModal({ type: 'decline', appointment });
+  };
+
+  // Faculty approves a pending request (mirrors the mobile app's
+  // `handleFacultyApprove`): the appointment becomes upcoming and eligible for
+  // the live queue, and the student is notified.
+  const confirmApprove = async (appt: Appointment) => {
+    if (actionInFlightRef.current) return;
+    if (!isPendingApproval(appt)) {
+      window.alert('This appointment is no longer awaiting your approval.');
+      return;
+    }
+
+    actionInFlightRef.current = true;
+    setActionBusy(true);
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({
+          student_approval_status: 'approved',
+          faculty_approval_status: 'approved',
+          status: 'upcoming',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', appt.id)
+        .eq('faculty_id', facultyId)
+        .eq('faculty_approval_status', 'pending')
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        window.alert('Could not approve appointment: ' + error.message);
+        return;
+      }
+      if (!data) {
+        window.alert('This appointment was already processed or is no longer available.');
+        return;
+      }
+
+      const approvedAppt: Appointment = {
+        ...appt,
+        status: 'Upcoming',
+        approved: true,
+        approvalStatus: 'approved',
+      };
+      setAppointments((prev) => prev.map((a) => (a.id === appt.id ? approvedAppt : a)));
+      setActionSuccess({ type: 'approved', appointment: approvedAppt });
+
+      // Make sure no stale queue spot exists; it is re-created when the
+      // one-hour queue window opens.
+      await supabase.from('queue_entries').delete().eq('appointment_id', appt.id);
+
+      if (appt.studentUserId) {
+        const { error: notifyError } = await supabase.from('notifications').insert({
+          user_id: appt.studentUserId,
+          sender_id: facultyId,
+          ...approvedMessage(
+            { name: facultyName, department: facultyDepartment, role: 'Faculty' },
+            { purpose: appt.purpose, category: appt.category },
+            formatWhen({ dateLabel: appt.date, timeLabel: appt.time }),
+          ),
+        });
+        if (notifyError) console.log('Failed to notify student:', notifyError.message);
+      }
+    } finally {
+      actionInFlightRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
   const confirmDecline = async () => {
     if (modal.type !== 'decline' || actionInFlightRef.current) return;
     const appt = modal.appointment;
@@ -909,6 +982,7 @@ export default function AppointmentsView({
               <th>Student</th>
               <th>Reason</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -969,13 +1043,41 @@ export default function AppointmentsView({
                     {isPendingApproval(appt) ? 'Pending' : appt.status}
                   </span>
                 </td>
+                <td onClick={(event) => event.stopPropagation()}>
+                  {isPendingApproval(appt) ? (
+                    <div className="av-actions">
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-approve"
+                        disabled={actionBusy}
+                        onClick={() => {
+                          if (window.confirm('Approve this request?')) {
+                            void confirmApprove(appt);
+                          }
+                        }}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="av-row-btn av-row-btn-danger"
+                        disabled={actionBusy}
+                        onClick={() => openDecline(appt)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="av-actions-muted">—</span>
+                  )}
+                </td>
               </tr>
               );
             })}
 
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className="av-empty">
+                <td colSpan={5} className="av-empty">
                   <div className="av-empty-inner">
                     <span className="av-empty-icon" aria-hidden="true">
                       <CalendarEmptyIcon />

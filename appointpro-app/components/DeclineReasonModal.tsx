@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { colors, spacing } from '../theme';
+import { validateCancelReason } from '../lib/cancelReason';
 import ProfileAvatar from './ProfileAvatar';
 
 const MAX_LENGTH = 200;
@@ -41,10 +42,44 @@ export default function DeclineReasonModal({
   onConfirm,
 }: Props) {
   const [reason, setReason] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (visible) setReason('');
+    if (visible) {
+      setReason('');
+      setError(null);
+      setChecking(false);
+    }
   }, [visible]);
+
+  // The reason is optional, but when one is typed it must be genuine (same
+  // check as cancelling) before the student is told about it.
+  const submit = async () => {
+    if (checking) return;
+    const text = reason.trim();
+    if (text) {
+      setChecking(true);
+      setError(null);
+      try {
+        const result = await validateCancelReason(text, 'faculty');
+        if (!result.valid) {
+          setError(result.message || 'Please share a genuine reason for declining.');
+          return;
+        }
+      } finally {
+        setChecking(false);
+      }
+    }
+    Alert.alert(
+      'Decline this request?',
+      'The student will be told it was declined. This cannot be undone.',
+      [
+        { text: 'Go Back', style: 'cancel' },
+        { text: 'Yes, Decline', style: 'destructive', onPress: () => onConfirm(text) },
+      ]
+    );
+  };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -64,7 +99,10 @@ export default function DeclineReasonModal({
               <TextInput
                 style={styles.input}
                 value={reason}
-                onChangeText={setReason}
+                onChangeText={(value) => {
+                  setReason(value);
+                  if (error) setError(null);
+                }}
                 placeholder="e.g. I'm unavailable at that time. Please book another slot."
                 placeholderTextColor="#9B9B9B"
                 multiline
@@ -74,22 +112,18 @@ export default function DeclineReasonModal({
               <Text style={styles.counter}>
                 {reason.length}/{MAX_LENGTH}
               </Text>
+              {!!error && <Text style={styles.error}>{error}</Text>}
 
               <View style={styles.buttons}>
                 <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
                   <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.declineButton} onPress={() =>
-                  Alert.alert(
-                    'Decline this request?',
-                    'The student will be told it was declined. This cannot be undone.',
-                    [
-                      { text: 'Go Back', style: 'cancel' },
-                      { text: 'Yes, Decline', style: 'destructive', onPress: () => onConfirm(reason.trim()) },
-                    ]
-                  )
-                }>
-                  <Text style={styles.declineText}>Decline Appointment</Text>
+                <TouchableOpacity
+                  style={[styles.declineButton, checking && { opacity: 0.6 }]}
+                  disabled={checking}
+                  onPress={submit}
+                >
+                  <Text style={styles.declineText}>{checking ? 'Checking…' : 'Decline Appointment'}</Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -117,6 +151,7 @@ const styles = StyleSheet.create({
     color: colors.textDark,
   },
   counter: { fontSize: 11, color: colors.textMuted, alignSelf: 'flex-end', marginTop: 4 },
+  error: { fontSize: 12, color: colors.danger, marginTop: 6 },
   buttons: { flexDirection: 'row', gap: 10, marginTop: spacing.lg },
   cancelButton: {
     flex: 1,
