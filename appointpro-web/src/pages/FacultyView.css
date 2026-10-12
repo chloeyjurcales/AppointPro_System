@@ -926,6 +926,17 @@
   opacity: 1;
 }
 
+.fv-slots-added-notice button.fv-notice-link {
+  opacity: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-success, #1f9d55);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .fv-empty-slots {
   font-size: 12.5px;
   color: var(--text-secondary, #6b7280);

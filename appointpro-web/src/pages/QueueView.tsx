@@ -33,6 +33,7 @@ type QueueEntry = {
         category: string | null;
         mode: 'Face-to-Face' | 'Online';
         location: string | null;
+        availability_slots: { end_time: string } | { end_time: string }[] | null;
         students:
           | {
               profiles:
@@ -61,6 +62,7 @@ type QueueEntry = {
         category: string | null;
         mode: 'Face-to-Face' | 'Online';
         location: string | null;
+        availability_slots: { end_time: string } | { end_time: string }[] | null;
         students:
           | {
               profiles:
@@ -90,6 +92,9 @@ type QueueItem = {
   date: string | null;
   startTime: string | null;
   endTime: string | null;
+  // When this consultation schedule (availability slot) ends. The queue stops
+  // here and only reopens for the next schedule.
+  windowEnd: Date | null;
   referenceNo: string | null;
   purpose: string;
   mode: 'Face-to-Face' | 'Online' | null;
@@ -181,6 +186,23 @@ function remainingSeconds(item: QueueItem, now: Date): number {
   );
 }
 
+// The queue closes at the end of the consultation schedule the appointment was
+// booked in (e.g. a 10–11 AM schedule closes at 11:00), or at the appointment's
+// own end when it has no schedule slot.
+function appointmentWindowEnd(
+  appointment:
+    | { date: string; end_time: string; availability_slots?: { end_time: string } | { end_time: string }[] | null }
+    | null
+    | undefined,
+): Date | null {
+  if (!appointment?.date || !appointment.end_time) return null;
+  const own = manilaDateFromDb(appointment.date, appointment.end_time);
+  const slotEnd = getFirst(appointment.availability_slots)?.end_time;
+  if (!slotEnd) return own;
+  const block = manilaDateFromDb(appointment.date, slotEnd);
+  return block > own ? block : own;
+}
+
 function mapQueueRow(row: QueueEntry): QueueItem {
   const appointment = getFirst(row.appointments);
   const student = getFirst(appointment?.students);
@@ -197,6 +219,7 @@ function mapQueueRow(row: QueueEntry): QueueItem {
     date: appointment?.date ?? row.queue_date ?? null,
     startTime: appointment?.start_time ?? null,
     endTime: appointment?.end_time ?? null,
+    windowEnd: appointmentWindowEnd(appointment),
     referenceNo: appointment?.reference_no ?? null,
     purpose: appointment?.purpose ?? appointment?.category ?? 'Consultation',
     mode: appointment?.mode ?? null,
@@ -226,9 +249,15 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only filled in while the queue is empty, to tell "nobody yet" from "all done".
-  const [daySummary, setDaySummary] = useState<{ completed: number; nextStart: string | null }>({
+  const [daySummary, setDaySummary] = useState<{
+    completed: number;
+    nextStart: string | null;
+    // Schedules whose time is over and whose queue has been closed.
+    closedUnserved: number;
+  }>({
     completed: 0,
     nextStart: null,
+    closedUnserved: 0,
   });
 
   useEffect(() => {
@@ -244,6 +273,7 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
         `id, faculty_id, appointment_id, student_name, duration_minutes, started_at, queue_date, position,
          appointments (
            id, student_id, date, start_time, end_time, status, faculty_approval_status, reference_no, purpose, category, mode, location,
+           availability_slots ( end_time ),
            students ( profiles ( full_name, avatar_url ) )
          )`,
       )
@@ -273,9 +303,13 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
       await supabase.from('queue_entries').delete().in('id', staleIds);
     }
 
+    // Once a consultation schedule has ended its queue is closed — hide anything
+    // left over right away (useQueueEngine also clears it from the database).
+    const nowForWindow = Date.now();
     const mapped = rows
       .filter((row) => !staleIds.includes(row.id))
       .map(mapQueueRow)
+      .filter((item) => !item.windowEnd || item.windowEnd.getTime() > nowForWindow)
       .sort((a, b) => {
         const aStarted = a.startedAt ? 0 : 1;
         const bStarted = b.startedAt ? 0 : 1;
@@ -291,13 +325,16 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
     if (mapped.length === 0) {
       const { data: dayRows } = await supabase
         .from('appointments')
-        .select('status, start_time, faculty_approval_status')
+        .select('status, start_time, end_time, faculty_approval_status, date, availability_slots ( end_time )')
         .eq('faculty_id', facultyId)
         .eq('date', today);
-      const rowsToday = (dayRows ?? []) as {
+      const rowsToday = (dayRows ?? []) as unknown as {
         status: string;
         start_time: string;
+        end_time: string;
+        date: string;
         faculty_approval_status: string | null;
+        availability_slots: { end_time: string } | { end_time: string }[] | null;
       }[];
       const approved = rowsToday.filter(
         (row) => (row.faculty_approval_status ?? 'approved') === 'approved',
@@ -311,9 +348,15 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
         )
         .map((row) => row.start_time)
         .sort();
+      const closedUnserved = approved.filter((row) => {
+        if (row.status !== 'upcoming') return false;
+        const end = appointmentWindowEnd(row);
+        return !!end && end <= nowTime;
+      }).length;
       setDaySummary({
         completed: approved.filter((row) => row.status === 'completed').length,
         nextStart: upcoming[0] ?? null,
+        closedUnserved,
       });
     }
   }, [facultyId]);
@@ -501,7 +544,8 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
         <p>
           Approved appointments appear here <strong>one hour before</strong> as a reminder and countdown.
           Each consultation starts <strong>exactly at its scheduled time</strong>. If a student hasn&apos;t shown up
-          <strong> {NO_SHOW_GRACE_MINUTES} minutes</strong> after it starts, you can skip them.
+          <strong> {NO_SHOW_GRACE_MINUTES} minutes</strong> after it starts, you can skip them. The queue
+          <strong> stops when the consultation schedule ends</strong> and only reopens for the next schedule.
         </p>
       </div>
 
@@ -539,16 +583,22 @@ export default function QueueView({ session, facultyName }: QueueViewProps) {
               <div className="qv-empty-icon">✓</div>
               {daySummary.nextStart ? (
                 <>
-                  <strong>No one is waiting right now.</strong>
+                  <strong>
+                    {daySummary.completed > 0 || daySummary.closedUnserved > 0
+                      ? 'The queue is closed for this consultation schedule.'
+                      : 'No one is waiting right now.'}
+                  </strong>
                   <span>
-                    Your next appointment is at {formatClockTime(daySummary.nextStart)}. It will appear here one hour before.
+                    The queue reopens for your next appointment at {formatClockTime(daySummary.nextStart)}. It will appear here one hour before.
                   </span>
                 </>
-              ) : daySummary.completed > 0 ? (
+              ) : daySummary.completed > 0 || daySummary.closedUnserved > 0 ? (
                 <>
-                  <strong>All consultations for today are done.</strong>
+                  <strong>The queue is closed — all consultation schedules for today have ended.</strong>
                   <span>
-                    {daySummary.completed} {daySummary.completed === 1 ? 'appointment' : 'appointments'} completed today. You can find them under Completed in Appointments.
+                    {daySummary.completed > 0
+                      ? `${daySummary.completed} ${daySummary.completed === 1 ? 'appointment' : 'appointments'} completed today. You can find them under Completed in Appointments.`
+                      : 'The queue will open again when your next consultation schedule begins.'}
                   </span>
                 </>
               ) : (

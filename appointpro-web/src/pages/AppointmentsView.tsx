@@ -10,6 +10,15 @@ import {
 } from '../lib/notificationMessages';
 import './AppointmentsView.css';
 
+/*
+  ELEMENT IDS
+  Every rendered element has a unique id so you can Ctrl+F it in DevTools.
+  Naming: av-<section>-<element>. Parent and child never share an id.
+  Rows use the appointment's id:  av-row-<appointmentId>-<part>
+  Tabs use the tab id:            av-tab-<tabId>
+  Reminders use their key:        av-reminder-<key>
+*/
+
 type AppointmentStatus = 'Upcoming' | 'Completed' | 'Cancelled';
 
 type MeetingMode = 'Face-to-Face' | 'Online';
@@ -160,10 +169,12 @@ function formatDbDateLabel(dateKey: string): string {
 }
 
 function StudentAvatar({
+  id,
   name,
   url,
   large = false,
 }: {
+  id: string;
   name: string;
   url: string | null;
   large?: boolean;
@@ -179,13 +190,14 @@ function StudentAvatar({
       .toUpperCase() || '?';
   return (
     <span
+      id={id}
       className={`av-avatar${large ? ' av-avatar-lg' : ''}`}
       aria-hidden="true"
     >
       {url && !failed ? (
-        <img src={url} alt="" onError={() => setFailed(true)} />
+        <img id={`${id}-img`} src={url} alt="" onError={() => setFailed(true)} />
       ) : (
-        initials
+        <span id={`${id}-initials`}>{initials}</span>
       )}
     </span>
   );
@@ -900,77 +912,85 @@ export default function AppointmentsView({
   };
 
   return (
-    <div className="av-page">
+    <div id="av-page" className="av-page">
+      {/* ================= SUCCESS MODAL ================= */}
       {actionSuccess && (
-        <div className="av-success-overlay" role="dialog" aria-modal="true">
-          <div className="av-success-modal">
-            <button type="button" className="av-success-close" onClick={() => setActionSuccess(null)} aria-label="Close">×</button>
-            <div className={`av-success-icon av-success-${actionSuccess.type}`}>
+        <div id="av-success-overlay" className="av-success-overlay" role="dialog" aria-modal="true">
+          <div id="av-success-modal" className="av-success-modal">
+            <button id="av-success-close-btn" type="button" className="av-success-close" onClick={() => setActionSuccess(null)} aria-label="Close">×</button>
+            <div id="av-success-icon" className={`av-success-icon av-success-${actionSuccess.type}`}>
               {actionSuccess.type === 'cancelled' ? '×' : '✓'}
             </div>
-            <h2>{actionSuccess.type === 'cancelled' ? 'Appointment Canceled!' : actionSuccess.type === 'rescheduled' ? 'Appointment Rescheduled!' : 'Appointment Approved!'}</h2>
-            <p className="av-success-subtitle">
+            <h2 id="av-success-title">{actionSuccess.type === 'cancelled' ? 'Appointment Canceled!' : actionSuccess.type === 'rescheduled' ? 'Appointment Rescheduled!' : 'Appointment Approved!'}</h2>
+            <p id="av-success-subtitle" className="av-success-subtitle">
               {actionSuccess.type === 'cancelled' ? 'The appointment has been successfully canceled.' : actionSuccess.type === 'rescheduled' ? 'The appointment has been successfully rescheduled.' : 'The appointment has been successfully approved.'}
             </p>
-            <div className="av-success-details">
-              <strong>{actionSuccess.appointment.studentName}</strong>
-              <span>{actionSuccess.appointment.category ?? actionSuccess.appointment.reason}</span>
-              <div className="av-success-detail-row"><span>📅</span><span>{actionSuccess.date ?? actionSuccess.appointment.date}</span></div>
-              <div className="av-success-detail-row"><span>🕒</span><span>{actionSuccess.time ?? actionSuccess.appointment.time}</span></div>
-              <div className="av-success-detail-row"><span>📍</span><span>{actionSuccess.location ?? actionSuccess.appointment.location}</span></div>
-              <div className="av-success-detail-row"><span>👥</span><span>{actionSuccess.mode ?? actionSuccess.appointment.mode}</span></div>
-              {actionSuccess.reason && <><div className="av-success-divider" /><strong className="av-success-label">Reason</strong><span>{actionSuccess.reason}</span></>}
-              <div className="av-success-divider" />
-              <strong className="av-success-label">Reference No.</strong>
-              <strong>{actionSuccess.appointment.referenceNo}</strong>
+            <div id="av-success-details-box" className="av-success-details">
+              <strong id="av-success-student-name">{actionSuccess.appointment.studentName}</strong>
+              <span id="av-success-category">{actionSuccess.appointment.category ?? actionSuccess.appointment.reason}</span>
+              <div id="av-success-row-date" className="av-success-detail-row"><span id="av-success-row-date-icon">📅</span><span id="av-success-row-date-text">{actionSuccess.date ?? actionSuccess.appointment.date}</span></div>
+              <div id="av-success-row-time" className="av-success-detail-row"><span id="av-success-row-time-icon">🕒</span><span id="av-success-row-time-text">{actionSuccess.time ?? actionSuccess.appointment.time}</span></div>
+              <div id="av-success-row-location" className="av-success-detail-row"><span id="av-success-row-location-icon">📍</span><span id="av-success-row-location-text">{actionSuccess.location ?? actionSuccess.appointment.location}</span></div>
+              <div id="av-success-row-mode" className="av-success-detail-row"><span id="av-success-row-mode-icon">👥</span><span id="av-success-row-mode-text">{actionSuccess.mode ?? actionSuccess.appointment.mode}</span></div>
+              {actionSuccess.reason && <><div id="av-success-reason-divider" className="av-success-divider" /><strong id="av-success-reason-label" className="av-success-label">Reason</strong><span id="av-success-reason-text">{actionSuccess.reason}</span></>}
+              <div id="av-success-ref-divider" className="av-success-divider" />
+              <strong id="av-success-ref-label" className="av-success-label">Reference No.</strong>
+              <strong id="av-success-ref-value">{actionSuccess.appointment.referenceNo}</strong>
             </div>
-            <div className="av-success-notice">🔔 {actionSuccess.appointment.studentName} has been notified of this {actionSuccess.type === 'cancelled' ? 'cancellation' : actionSuccess.type === 'rescheduled' ? 'change' : 'approval'}.</div>
-            <button type="button" className="av-success-back" onClick={() => setActionSuccess(null)}>Back to Appointments</button>
+            <div id="av-success-notice" className="av-success-notice">🔔 {actionSuccess.appointment.studentName} has been notified of this {actionSuccess.type === 'cancelled' ? 'cancellation' : actionSuccess.type === 'rescheduled' ? 'change' : 'approval'}.</div>
+            <button id="av-success-back-btn" type="button" className="av-success-back" onClick={() => setActionSuccess(null)}>Back to Appointments</button>
           </div>
         </div>
       )}
 
-      <div className="av-header">
-        <div>
-          <h1>Appointments</h1>
-          <p>View and manage your appointments.</p>
+      {/* ================= HEADER ================= */}
+      <div id="av-header" className="av-header">
+        <div id="av-header-text">
+          <h1 id="av-header-title">Appointments</h1>
+          <p id="av-header-subtitle">View and manage your appointments.</p>
         </div>
       </div>
 
+      {/* ================= REMINDERS ================= */}
       {reminders.length > 0 && (
-        <div className="av-reminders">
+        <div id="av-reminders" className="av-reminders">
           {reminders.map((reminder) => (
-            <div key={reminder.key} className="av-reminder-banner">
-              <BellIcon />
-              <span>{reminder.message}</span>
+            <div id={`av-reminder-${reminder.key}`} key={reminder.key} className="av-reminder-banner">
+              <BellIcon id={`av-reminder-${reminder.key}-bell-icon`} />
+              <span id={`av-reminder-${reminder.key}-message`}>{reminder.message}</span>
               <button
+                id={`av-reminder-${reminder.key}-dismiss-btn`}
                 type="button"
                 aria-label="Dismiss reminder"
                 onClick={() => dismissReminder(reminder.key)}
               >
-                <XSmallIcon />
+                <XSmallIcon id={`av-reminder-${reminder.key}-dismiss-icon`} />
               </button>
             </div>
           ))}
         </div>
       )}
 
+      {/* ================= ACTION TOAST ================= */}
       {actionNotice && (
-        <div className="av-queue-toast">
-          <CheckSmallIcon />
-          <span>{actionNotice}</span>
+        <div id="av-toast" className="av-queue-toast">
+          <CheckSmallIcon id="av-toast-check-icon" />
+          <span id="av-toast-message">{actionNotice}</span>
           <button
+            id="av-toast-dismiss-btn"
             type="button"
             aria-label="Dismiss"
             onClick={() => setActionNotice(null)}
           >
-            <XSmallIcon />
+            <XSmallIcon id="av-toast-dismiss-icon" />
           </button>
         </div>
       )}
 
-      <div className="av-search">
+      {/* ================= SEARCH ================= */}
+      <div id="av-search" className="av-search">
         <input
+          id="av-search-input"
           type="search"
           className="av-search-input"
           placeholder="Search by reference number (e.g. APP-2026-000791)"
@@ -979,9 +999,11 @@ export default function AppointmentsView({
         />
       </div>
 
-      <div className="av-tabs">
+      {/* ================= TABS ================= */}
+      <div id="av-tabs" className="av-tabs">
         {tabs.map((tab) => (
           <button
+            id={`av-tab-${tab.id}`}
             key={tab.id}
             type="button"
             className={`av-tab${activeTab === tab.id ? ' av-tab-active' : ''}`}
@@ -992,24 +1014,27 @@ export default function AppointmentsView({
         ))}
       </div>
 
-      <div className="av-table-card">
-        <table className="av-table">
-          <thead>
-            <tr>
-              <th>Date &amp; Time</th>
-              <th>Student</th>
-              <th>Reason</th>
-              <th>Status</th>
-              <th>Actions</th>
+      {/* ================= TABLE ================= */}
+      <div id="av-table-card" className="av-table-card">
+        <table id="av-table" className="av-table">
+          <thead id="av-table-head">
+            <tr id="av-table-head-row">
+              <th id="av-th-datetime">Date &amp; Time</th>
+              <th id="av-th-student">Student</th>
+              <th id="av-th-reason">Reason</th>
+              <th id="av-th-status">Status</th>
+              <th id="av-th-actions">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="av-table-body">
             {filtered.map((appt) => {
               const isHistory =
                 appt.status === 'Completed' || appt.status === 'Cancelled';
+              const rid = `av-row-${appt.id}`;
 
               return (
               <tr
+                id={rid}
                 key={appt.id}
                 className={isHistory ? 'av-history-row' : undefined}
                 onClick={isHistory ? () => openDetails(appt) : undefined}
@@ -1031,29 +1056,31 @@ export default function AppointmentsView({
                     : undefined
                 }
               >
-                <td>
-                  <div className="av-datetime">
-                    <span className="av-date">{appt.date}</span>
-                    <span className="av-time">{appt.time}</span>
+                <td id={`${rid}-cell-datetime`}>
+                  <div id={`${rid}-datetime`} className="av-datetime">
+                    <span id={`${rid}-date`} className="av-date">{appt.date}</span>
+                    <span id={`${rid}-time`} className="av-time">{appt.time}</span>
                   </div>
                 </td>
-                <td className="av-student">
-                  <div className="av-student-cell">
+                <td id={`${rid}-cell-student`} className="av-student">
+                  <div id={`${rid}-student-cell`} className="av-student-cell">
                     <StudentAvatar
+                      id={`${rid}-avatar`}
                       name={appt.studentName}
                       url={appt.studentAvatarUrl}
                     />
-                    <div className="av-student-text">
-                      <span className="av-student-name">{appt.studentName}</span>
+                    <div id={`${rid}-student-text`} className="av-student-text">
+                      <span id={`${rid}-student-name`} className="av-student-name">{appt.studentName}</span>
                       {appt.referenceNo && (
-                        <div className="av-ref">Ref: {appt.referenceNo}</div>
+                        <div id={`${rid}-ref`} className="av-ref">Ref: {appt.referenceNo}</div>
                       )}
                     </div>
                   </div>
                 </td>
-                <td className="av-reason">{appt.reason}</td>
-                <td>
+                <td id={`${rid}-cell-reason`} className="av-reason">{appt.reason}</td>
+                <td id={`${rid}-cell-status`}>
                   <span
+                    id={`${rid}-status`}
                     className={`av-status av-status-${
                       isPendingApproval(appt) ? 'pending' : appt.status.toLowerCase()
                     }`}
@@ -1061,10 +1088,11 @@ export default function AppointmentsView({
                     {isPendingApproval(appt) ? 'Pending' : appt.status}
                   </span>
                 </td>
-                <td onClick={(event) => event.stopPropagation()}>
+                <td id={`${rid}-cell-actions`} onClick={(event) => event.stopPropagation()}>
                   {isPendingApproval(appt) ? (
-                    <div className="av-actions">
+                    <div id={`${rid}-actions`} className="av-actions">
                       <button
+                        id={`${rid}-btn-approve`}
                         type="button"
                         className="av-row-btn av-row-btn-approve"
                         disabled={actionBusy}
@@ -1077,6 +1105,7 @@ export default function AppointmentsView({
                         Approve
                       </button>
                       <button
+                        id={`${rid}-btn-decline`}
                         type="button"
                         className="av-row-btn av-row-btn-danger"
                         disabled={actionBusy}
@@ -1086,8 +1115,9 @@ export default function AppointmentsView({
                       </button>
                     </div>
                   ) : appt.status === 'Upcoming' ? (
-                    <div className="av-actions">
+                    <div id={`${rid}-actions`} className="av-actions">
                       <button
+                        id={`${rid}-btn-reschedule`}
                         type="button"
                         className="av-row-btn av-row-btn-reschedule"
                         disabled={actionBusy}
@@ -1096,6 +1126,7 @@ export default function AppointmentsView({
                         Reschedule
                       </button>
                       <button
+                        id={`${rid}-btn-cancel`}
                         type="button"
                         className="av-row-btn av-row-btn-danger"
                         disabled={actionBusy}
@@ -1105,7 +1136,7 @@ export default function AppointmentsView({
                       </button>
                     </div>
                   ) : (
-                    <span className="av-actions-muted">—</span>
+                    <span id={`${rid}-actions-none`} className="av-actions-muted">—</span>
                   )}
                 </td>
               </tr>
@@ -1113,20 +1144,20 @@ export default function AppointmentsView({
             })}
 
             {filtered.length === 0 && (
-              <tr>
-                <td colSpan={5} className="av-empty">
-                  <div className="av-empty-inner">
-                    <span className="av-empty-icon" aria-hidden="true">
-                      <CalendarEmptyIcon />
+              <tr id="av-empty-row">
+                <td id="av-empty-cell" colSpan={5} className="av-empty">
+                  <div id="av-empty-inner" className="av-empty-inner">
+                    <span id="av-empty-icon" className="av-empty-icon" aria-hidden="true">
+                      <CalendarEmptyIcon id="av-empty-calendar-icon" />
                     </span>
-                    <span className="av-empty-title">
+                    <span id="av-empty-title" className="av-empty-title">
                       {refQuery
                         ? 'No appointment found with that reference number'
                         : activeTab === 'pending'
                           ? 'No requests waiting for your approval'
                           : 'No appointments in this category'}
                     </span>
-                    <span className="av-empty-subtitle">
+                    <span id="av-empty-subtitle" className="av-empty-subtitle">
                       New bookings will show up here as students schedule
                       them.
                     </span>
@@ -1137,100 +1168,107 @@ export default function AppointmentsView({
           </tbody>
         </table>
 
-        <div className="av-footer">
+        <div id="av-footer" className="av-footer">
           Showing {filtered.length === 0 ? 0 : 1}-{filtered.length} of{' '}
           {filtered.length}
         </div>
       </div>
 
+      {/* ================= MODALS ================= */}
       {modal.type !== 'none' && (
-        <div className="av-modal-overlay" onClick={closeModal}>
+        <div id="av-modal-overlay" className="av-modal-overlay" onClick={closeModal}>
           <div
+            id="av-modal-dialog"
             className="av-modal"
             role="dialog"
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
           >
+            {/* ---------- DETAILS ---------- */}
             {modal.type === 'details' && (
               <>
-                <div className="av-modal-heading-row">
-                  <div>
-                    <h2>Appointment Details</h2>
-                    <p className="av-modal-heading-subtitle">
+                <div id="av-details-heading-row" className="av-modal-heading-row">
+                  <div id="av-details-heading-text">
+                    <h2 id="av-details-title">Appointment Details</h2>
+                    <p id="av-details-subtitle" className="av-modal-heading-subtitle">
                       {modal.appointment.status} appointment
                     </p>
                   </div>
                   <button
+                    id="av-details-close-btn"
                     type="button"
                     className="av-modal-close"
                     aria-label="Close appointment details"
                     onClick={closeModal}
                   >
-                    <XSmallIcon />
+                    <XSmallIcon id="av-details-close-icon" />
                   </button>
                 </div>
 
-                <div className="av-details-status">
+                <div id="av-details-status-wrap" className="av-details-status">
                   <span
+                    id="av-details-status-badge"
                     className={`av-status av-status-${modal.appointment.status.toLowerCase()}`}
                   >
                     {modal.appointment.status}
                   </span>
                 </div>
 
-                <div className="av-details-grid">
-                  <div className="av-details-item av-details-item-wide">
-                    <span className="av-details-label">Student</span>
-                    <div className="av-student-cell">
+                <div id="av-details-grid" className="av-details-grid">
+                  <div id="av-details-item-student" className="av-details-item av-details-item-wide">
+                    <span id="av-details-label-student" className="av-details-label">Student</span>
+                    <div id="av-details-student-cell" className="av-student-cell">
                       <StudentAvatar
+                        id="av-details-student-avatar"
                         name={modal.appointment.studentName}
                         url={modal.appointment.studentAvatarUrl}
                         large
                       />
-                      <strong>{modal.appointment.studentName}</strong>
+                      <strong id="av-details-student-name">{modal.appointment.studentName}</strong>
                     </div>
                     {modal.appointment.studentInfo && (
-                      <span className="av-details-value-muted">
+                      <span id="av-details-student-info" className="av-details-value-muted">
                         {modal.appointment.studentInfo}
                       </span>
                     )}
                   </div>
 
-                  <div className="av-details-item">
-                    <span className="av-details-label">Date</span>
-                    <strong>{modal.appointment.date}</strong>
+                  <div id="av-details-item-date" className="av-details-item">
+                    <span id="av-details-label-date" className="av-details-label">Date</span>
+                    <strong id="av-details-value-date">{modal.appointment.date}</strong>
                   </div>
 
-                  <div className="av-details-item">
-                    <span className="av-details-label">Time</span>
-                    <strong>{modal.appointment.time}</strong>
+                  <div id="av-details-item-time" className="av-details-item">
+                    <span id="av-details-label-time" className="av-details-label">Time</span>
+                    <strong id="av-details-value-time">{modal.appointment.time}</strong>
                   </div>
 
-                  <div className="av-details-item av-details-item-wide">
-                    <span className="av-details-label">Reason / Purpose</span>
-                    <strong>{modal.appointment.reason}</strong>
+                  <div id="av-details-item-reason" className="av-details-item av-details-item-wide">
+                    <span id="av-details-label-reason" className="av-details-label">Reason / Purpose</span>
+                    <strong id="av-details-value-reason">{modal.appointment.reason}</strong>
                   </div>
 
-                  <div className="av-details-item">
-                    <span className="av-details-label">Meeting Mode</span>
-                    <strong>{modal.appointment.mode}</strong>
+                  <div id="av-details-item-mode" className="av-details-item">
+                    <span id="av-details-label-mode" className="av-details-label">Meeting Mode</span>
+                    <strong id="av-details-value-mode">{modal.appointment.mode}</strong>
                   </div>
 
-                  <div className="av-details-item">
-                    <span className="av-details-label">Duration</span>
-                    <strong>{modal.appointment.durationMinutes} minutes</strong>
+                  <div id="av-details-item-duration" className="av-details-item">
+                    <span id="av-details-label-duration" className="av-details-label">Duration</span>
+                    <strong id="av-details-value-duration">{modal.appointment.durationMinutes} minutes</strong>
                   </div>
 
-                  <div className="av-details-item av-details-item-wide">
-                    <span className="av-details-label">Location / Meeting Link</span>
-                    <strong className="av-details-break">
+                  <div id="av-details-item-location" className="av-details-item av-details-item-wide">
+                    <span id="av-details-label-location" className="av-details-label">Location / Meeting Link</span>
+                    <strong id="av-details-value-location" className="av-details-break">
                       {modal.appointment.location || 'Not specified'}
                     </strong>
                   </div>
                 </div>
 
-                <div className="av-modal-actions">
+                <div id="av-details-actions" className="av-modal-actions">
                   <button
+                    id="av-details-btn-close"
                     type="button"
                     className="av-modal-btn av-modal-btn-secondary"
                     onClick={closeModal}
@@ -1241,23 +1279,24 @@ export default function AppointmentsView({
               </>
             )}
 
+            {/* ---------- CANCEL ---------- */}
             {modal.type === 'cancel' && (
               <>
-                <h2>Cancel Appointment</h2>
+                <h2 id="av-cancel-title">Cancel Appointment</h2>
 
-                <div className="av-modal-summary">
-                  <p className="av-modal-summary-name">
+                <div id="av-cancel-summary" className="av-modal-summary">
+                  <p id="av-cancel-summary-name" className="av-modal-summary-name">
                     {modal.appointment.studentName}
                   </p>
-                  <p className="av-modal-summary-line">
+                  <p id="av-cancel-summary-datetime" className="av-modal-summary-line">
                     {modal.appointment.date} · {modal.appointment.time}
                   </p>
-                  <p className="av-modal-summary-muted">
+                  <p id="av-cancel-summary-reason" className="av-modal-summary-muted">
                     {modal.appointment.reason}
                   </p>
                 </div>
 
-                <label className="av-modal-label" htmlFor="av-cancel-reason">
+                <label id="av-cancel-reason-label" className="av-modal-label" htmlFor="av-cancel-reason">
                   Reason for Cancellation
                 </label>
                 <textarea
@@ -1275,22 +1314,23 @@ export default function AppointmentsView({
                 />
 
                 {cancelReasonError && (
-                  <div className="av-modal-warning" role="alert">
-                    <AlertIcon />
-                    <p>{cancelReasonError}</p>
+                  <div id="av-cancel-error" className="av-modal-warning" role="alert">
+                    <AlertIcon id="av-cancel-error-icon" />
+                    <p id="av-cancel-error-text">{cancelReasonError}</p>
                   </div>
                 )}
 
-                <div className="av-modal-warning">
-                  <AlertIcon />
-                  <p>
+                <div id="av-cancel-warning" className="av-modal-warning">
+                  <AlertIcon id="av-cancel-warning-icon" />
+                  <p id="av-cancel-warning-text">
                     The student will be notified immediately once this
                     appointment is cancelled.
                   </p>
                 </div>
 
-                <div className="av-modal-actions">
+                <div id="av-cancel-actions" className="av-modal-actions">
                   <button
+                    id="av-cancel-btn-confirm"
                     type="button"
                     className="av-modal-btn av-modal-btn-danger"
                     disabled={!cancelReason.trim() || actionBusy}
@@ -1299,6 +1339,7 @@ export default function AppointmentsView({
                     {cancelChecking ? 'Checking…' : actionBusy ? 'Cancelling…' : 'Cancel Appointment'}
                   </button>
                   <button
+                    id="av-cancel-btn-keep"
                     type="button"
                     className="av-modal-btn av-modal-btn-secondary"
                     onClick={closeModal}
@@ -1309,23 +1350,24 @@ export default function AppointmentsView({
               </>
             )}
 
+            {/* ---------- DECLINE ---------- */}
             {modal.type === 'decline' && (
               <>
-                <h2>Decline Appointment Request</h2>
+                <h2 id="av-decline-title">Decline Appointment Request</h2>
 
-                <div className="av-modal-summary">
-                  <p className="av-modal-summary-name">
+                <div id="av-decline-summary" className="av-modal-summary">
+                  <p id="av-decline-summary-name" className="av-modal-summary-name">
                     {modal.appointment.studentName}
                   </p>
-                  <p className="av-modal-summary-line">
+                  <p id="av-decline-summary-datetime" className="av-modal-summary-line">
                     {modal.appointment.date} · {modal.appointment.time}
                   </p>
-                  <p className="av-modal-summary-muted">
+                  <p id="av-decline-summary-reason" className="av-modal-summary-muted">
                     {modal.appointment.reason}
                   </p>
                 </div>
 
-                <label className="av-modal-label" htmlFor="av-decline-reason">
+                <label id="av-decline-reason-label" className="av-modal-label" htmlFor="av-decline-reason">
                   Reason (optional)
                 </label>
                 <textarea
@@ -1338,16 +1380,17 @@ export default function AppointmentsView({
                   onChange={(event) => setDeclineReason(event.target.value)}
                 />
 
-                <div className="av-modal-warning">
-                  <AlertIcon />
-                  <p>
+                <div id="av-decline-warning" className="av-modal-warning">
+                  <AlertIcon id="av-decline-warning-icon" />
+                  <p id="av-decline-warning-text">
                     The student will be notified and the requested time will be
                     released.
                   </p>
                 </div>
 
-                <div className="av-modal-actions">
+                <div id="av-decline-actions" className="av-modal-actions">
                   <button
+                    id="av-decline-btn-confirm"
                     type="button"
                     className="av-modal-btn av-modal-btn-danger"
                     onClick={confirmDecline}
@@ -1355,6 +1398,7 @@ export default function AppointmentsView({
                     Decline Request
                   </button>
                   <button
+                    id="av-decline-btn-keep"
                     type="button"
                     className="av-modal-btn av-modal-btn-secondary"
                     onClick={closeModal}
@@ -1365,28 +1409,29 @@ export default function AppointmentsView({
               </>
             )}
 
+            {/* ---------- RESCHEDULE ---------- */}
             {modal.type === 'reschedule' && (
               <>
-                <h2>Reschedule Appointment</h2>
+                <h2 id="av-res-title">Reschedule Appointment</h2>
 
-                <div className="av-modal-summary">
-                  <p className="av-modal-summary-name">
+                <div id="av-res-summary" className="av-modal-summary">
+                  <p id="av-res-summary-name" className="av-modal-summary-name">
                     {modal.appointment.studentName}
                   </p>
-                  <p className="av-modal-summary-line">
+                  <p id="av-res-summary-current" className="av-modal-summary-line">
                     Currently: {modal.appointment.date} ·{' '}
                     {modal.appointment.time}
                   </p>
-                  <p className="av-modal-summary-muted">
+                  <p id="av-res-summary-reason" className="av-modal-summary-muted">
                     {modal.appointment.reason}
                   </p>
-                  <p className="av-modal-summary-muted">
+                  <p id="av-res-summary-mode-location" className="av-modal-summary-muted">
                     {modal.appointment.mode} · {modal.appointment.location}
                   </p>
                 </div>
 
-                <div className="av-modal-field">
-                  <label htmlFor="av-res-date">New Date</label>
+                <div id="av-res-date-field" className="av-modal-field">
+                  <label id="av-res-date-label" htmlFor="av-res-date">New Date</label>
                   <input
                     id="av-res-date"
                     type="date"
@@ -1395,9 +1440,9 @@ export default function AppointmentsView({
                   />
                 </div>
 
-                <div className="av-modal-field-row">
-                  <div className="av-modal-field">
-                    <label htmlFor="av-res-start">Start Time</label>
+                <div id="av-res-time-row" className="av-modal-field-row">
+                  <div id="av-res-start-field" className="av-modal-field">
+                    <label id="av-res-start-label" htmlFor="av-res-start">Start Time</label>
                     <input
                       id="av-res-start"
                       type="time"
@@ -1407,8 +1452,8 @@ export default function AppointmentsView({
                       }
                     />
                   </div>
-                  <div className="av-modal-field">
-                    <label htmlFor="av-res-end">End Time</label>
+                  <div id="av-res-end-field" className="av-modal-field">
+                    <label id="av-res-end-label" htmlFor="av-res-end">End Time</label>
                     <input
                       id="av-res-end"
                       type="time"
@@ -1418,10 +1463,10 @@ export default function AppointmentsView({
                   </div>
                 </div>
 
-                <label className="av-modal-label" htmlFor="av-res-mode-ftf">
+                <label id="av-res-mode-label" className="av-modal-label" htmlFor="av-res-mode-ftf">
                   New Meeting Mode
                 </label>
-                <div className="av-modal-mode-toggle">
+                <div id="av-res-mode-toggle" className="av-modal-mode-toggle">
                   <button
                     type="button"
                     id="av-res-mode-ftf"
@@ -1436,6 +1481,7 @@ export default function AppointmentsView({
                   </button>
                   <button
                     type="button"
+                    id="av-res-mode-online"
                     className={`av-modal-mode-btn${
                       rescheduleMode === 'Online'
                         ? ' av-modal-mode-btn-active'
@@ -1449,7 +1495,7 @@ export default function AppointmentsView({
 
                 {rescheduleMode === 'Face-to-Face' && (
                   <>
-                    <label className="av-modal-label" htmlFor="av-res-room">
+                    <label id="av-res-room-label" className="av-modal-label" htmlFor="av-res-room">
                       Room / Location
                     </label>
                     <input
@@ -1467,7 +1513,7 @@ export default function AppointmentsView({
 
                 {rescheduleMode === 'Online' && (
                   <>
-                    <label className="av-modal-label" htmlFor="av-res-link">
+                    <label id="av-res-link-label" className="av-modal-label" htmlFor="av-res-link">
                       New Meeting Link
                     </label>
                     <input
@@ -1480,14 +1526,14 @@ export default function AppointmentsView({
                         setRescheduleMeetingLink(event.target.value)
                       }
                     />
-                    <p className="av-modal-link-hint">
+                    <p id="av-res-link-hint" className="av-modal-link-hint">
                       This appointment moved to an online slot — the student
                       needs a fresh link since the old one no longer applies.
                     </p>
                   </>
                 )}
 
-                <label className="av-modal-label" htmlFor="av-res-reason">
+                <label id="av-res-reason-label" className="av-modal-label" htmlFor="av-res-reason">
                   Reason for Reschedule
                 </label>
                 <textarea
@@ -1501,8 +1547,9 @@ export default function AppointmentsView({
                   }
                 />
 
-                <div className="av-modal-actions">
+                <div id="av-res-actions" className="av-modal-actions">
                   <button
+                    id="av-res-btn-confirm"
                     type="button"
                     className="av-modal-btn av-modal-btn-primary"
                     disabled={!canConfirmReschedule}
@@ -1511,6 +1558,7 @@ export default function AppointmentsView({
                     Confirm Reschedule
                   </button>
                   <button
+                    id="av-res-btn-cancel"
                     type="button"
                     className="av-modal-btn av-modal-btn-secondary"
                     onClick={closeModal}
@@ -1528,27 +1576,30 @@ export default function AppointmentsView({
 }
 
 /* Small inline icons so this component has zero extra icon-library
-   dependencies (same convention as Dashboard.tsx / LoginPage.tsx). */
+   dependencies (same convention as Dashboard.tsx / LoginPage.tsx).
+   Each icon takes an `id` for its <svg>; inner shapes get `<id>-shape-N`. */
 
-function AlertIcon() {
+function AlertIcon({ id }: { id: string }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+    <svg id={id} width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle id={`${id}-shape-1`} cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
       <path
+        id={`${id}-shape-2`}
         d="M12 7.5v5.5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
       />
-      <circle cx="12" cy="16.3" r="1" fill="currentColor" />
+      <circle id={`${id}-shape-3`} cx="12" cy="16.3" r="1" fill="currentColor" />
     </svg>
   );
 }
 
-function CalendarEmptyIcon() {
+function CalendarEmptyIcon({ id }: { id: string }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+    <svg id={id} width="22" height="22" viewBox="0 0 24 24" fill="none">
       <rect
+        id={`${id}-shape-1`}
         x="3.5"
         y="5.5"
         width="17"
@@ -1558,12 +1609,14 @@ function CalendarEmptyIcon() {
         strokeWidth="1.6"
       />
       <path
+        id={`${id}-shape-2`}
         d="M3.5 9.5h17M8 3.5v4M16 3.5v4"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
       />
       <path
+        id={`${id}-shape-3`}
         d="M9 14.5h6"
         stroke="currentColor"
         strokeWidth="1.6"
@@ -1573,16 +1626,18 @@ function CalendarEmptyIcon() {
   );
 }
 
-function BellIcon() {
+function BellIcon({ id }: { id: string }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <svg id={id} width="16" height="16" viewBox="0 0 24 24" fill="none">
       <path
+        id={`${id}-shape-1`}
         d="M6 10.5a6 6 0 1 1 12 0v3.5l1.5 3H4.5l1.5-3v-3.5Z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
       />
       <path
+        id={`${id}-shape-2`}
         d="M10 20a2 2 0 0 0 4 0"
         stroke="currentColor"
         strokeWidth="1.6"
@@ -1592,10 +1647,11 @@ function BellIcon() {
   );
 }
 
-function CheckSmallIcon() {
+function CheckSmallIcon({ id }: { id: string }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+    <svg id={id} width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path
+        id={`${id}-shape-1`}
         d="M5 12.5l4.5 4.5L19 7"
         stroke="currentColor"
         strokeWidth="2.2"
@@ -1606,10 +1662,11 @@ function CheckSmallIcon() {
   );
 }
 
-function XSmallIcon() {
+function XSmallIcon({ id }: { id: string }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <svg id={id} width="13" height="13" viewBox="0 0 24 24" fill="none">
       <path
+        id={`${id}-shape-1`}
         d="M6 6l12 12M18 6L6 18"
         stroke="currentColor"
         strokeWidth="2"

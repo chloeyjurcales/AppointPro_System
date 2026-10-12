@@ -5,6 +5,8 @@ import { supabase } from './supabase';
 // open (mirrors what the mobile app does from App.tsx):
 //   1. an approved appointment joins today's queue one hour before it starts;
 //   2. the person at the front is marked "started" at their scheduled time.
+// 3. the queue stops when its consultation schedule ends (e.g. a 10–11 AM
+//    schedule closes at 11:00) and only reopens for the next schedule.
 // QueueView only displays the queue and handles Done / Skip.
 //
 // Appointment date/time values have no timezone; AppointPro treats them as
@@ -43,25 +45,51 @@ function formatClockTime(time24: string): string {
 
 type Profile = { full_name: string };
 
+type SlotEnd = { end_time: string } | { end_time: string }[] | null;
+
+// The queue's closing time: the end of the consultation schedule (availability
+// slot) the appointment was booked in, or the appointment's own end when it has
+// no slot (e.g. after a reschedule).
+function queueWindowEnd(
+  date: string,
+  appointmentEnd: string,
+  slot: SlotEnd | undefined,
+): Date {
+  const slotEnd = getFirst(slot)?.end_time;
+  const end = manilaDateFromDb(date, appointmentEnd);
+  if (!slotEnd) return end;
+  const blockEnd = manilaDateFromDb(date, slotEnd);
+  return blockEnd > end ? blockEnd : end;
+}
+
 type ScheduledAppointment = {
   id: string;
   student_id: string;
   date: string;
   start_time: string;
   end_time: string;
+  availability_slots: SlotEnd;
   students:
     | { profiles: Profile | Profile[] | null }
     | { profiles: Profile | Profile[] | null }[]
     | null;
 };
 
+type QueueAppointment = {
+  id: string;
+  student_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  faculty_approval_status?: string | null;
+  availability_slots: SlotEnd;
+};
+
 type QueueRow = {
   id: string;
   started_at: string | null;
-  appointments:
-    | { student_id: string; date: string; start_time: string; status: string; faculty_approval_status?: string | null }
-    | { student_id: string; date: string; start_time: string; status: string; faculty_approval_status?: string | null }[]
-    | null;
+  appointments: QueueAppointment | QueueAppointment[] | null;
 };
 
 export function useQueueEngine(facultyId: string, facultyName: string) {
@@ -96,7 +124,7 @@ export function useQueueEngine(facultyId: string, facultyName: string) {
       const { data, error } = await supabase
         .from('appointments')
         .select(
-          'id, student_id, date, start_time, end_time, students ( profiles ( full_name ) )',
+          'id, student_id, date, start_time, end_time, availability_slots ( end_time ), students ( profiles ( full_name ) )',
         )
         .eq('faculty_id', facultyId)
         .eq('date', today)
@@ -109,7 +137,14 @@ export function useQueueEngine(facultyId: string, facultyName: string) {
         const start = manilaDateFromDb(appointment.date, appointment.start_time);
         const end = manilaDateFromDb(appointment.date, appointment.end_time);
         const opensAt = new Date(start.getTime() - 60 * 60 * 1000);
-        if (now < opensAt || now > end) continue;
+        const closesAt = queueWindowEnd(
+          appointment.date,
+          appointment.end_time,
+          appointment.availability_slots,
+        );
+        // Outside the schedule's window the queue is closed: it opens one hour
+        // before this appointment and stops when the schedule ends.
+        if (now < opensAt || now > end || now >= closesAt) continue;
 
         const { data: existing, error: existingError } = await supabase
           .from('queue_entries')
@@ -168,6 +203,44 @@ export function useQueueEngine(facultyId: string, facultyName: string) {
           `Your appointment with ${nameRef.current} starts at ${timeLabel}. The queue is now open — your appointment is on the way.`,
           true,
         );
+      }
+    };
+
+    // Stops the queue once its consultation schedule is over. Anyone still in
+    // it is removed; a student who was being served is marked completed. Waiting
+    // students are left as scheduled (never silently cancelled). The queue then
+    // stays empty until the next schedule's window opens.
+    const closeFinishedQueue = async (now: Date) => {
+      const today = manilaDateKey(now);
+      const { data, error } = await supabase
+        .from('queue_entries')
+        .select(
+          'id, started_at, appointments ( id, student_id, date, start_time, end_time, status, availability_slots ( end_time ) )',
+        )
+        .eq('faculty_id', facultyId)
+        .eq('queue_date', today);
+      if (error || !data?.length) return;
+
+      for (const row of data as unknown as QueueRow[]) {
+        if (cancelled) return;
+        const appointment = getFirst(row.appointments);
+        if (!appointment) continue;
+        const closesAt = queueWindowEnd(
+          appointment.date,
+          appointment.end_time,
+          appointment.availability_slots,
+        );
+        if (now < closesAt) continue;
+
+        if (row.started_at && appointment.status === 'upcoming') {
+          await supabase
+            .from('appointments')
+            .update({ status: 'completed', updated_at: new Date().toISOString() })
+            .eq('id', appointment.id)
+            .eq('faculty_id', facultyId)
+            .eq('status', 'upcoming');
+        }
+        await supabase.from('queue_entries').delete().eq('id', row.id);
       }
     };
 
@@ -247,6 +320,7 @@ export function useQueueEngine(facultyId: string, facultyName: string) {
       busyRef.current = true;
       try {
         const now = new Date();
+        await closeFinishedQueue(now);
         await syncScheduledQueue(now);
         await startFrontIfDue(now);
       } catch (err) {

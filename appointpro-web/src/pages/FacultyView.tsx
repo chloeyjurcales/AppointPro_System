@@ -194,11 +194,29 @@ function formatHourRangeLabel(startHour: number): string {
   return `${formatHourLabel(startHour)} – ${formatHourLabel((startHour + 1) % 24)}`;
 }
 
-const SCHEDULE_TIME_ROWS = SCHEDULE_ROW_START_HOURS.map((startHour) => ({
-  label: formatHourRangeLabel(startHour),
-  start: startHour * 60,
-  end: (startHour + 1) * 60,
-}));
+// The axis defaults to 7 AM–9 PM but widens to include any saved slot that
+// falls outside it, so a saved availability can never be hidden.
+function buildScheduleTimeRows(
+  slotRangesByDate: Record<string, { start: number; end: number }[]>,
+) {
+  let firstHour = SCHEDULE_ROW_START_HOURS[0];
+  let lastHour = SCHEDULE_ROW_START_HOURS[SCHEDULE_ROW_START_HOURS.length - 1];
+  Object.values(slotRangesByDate).forEach((ranges) =>
+    ranges.forEach((range) => {
+      firstHour = Math.min(firstHour, Math.floor(range.start / 60));
+      lastHour = Math.max(lastHour, Math.ceil(range.end / 60) - 1);
+    }),
+  );
+  const rows: { label: string; start: number; end: number }[] = [];
+  for (let hour = firstHour; hour <= Math.min(lastHour, 23); hour++) {
+    rows.push({
+      label: formatHourRangeLabel(hour),
+      start: hour * 60,
+      end: (hour + 1) * 60,
+    });
+  }
+  return rows;
+}
 
 function timeRangesOverlap(
   aStart: number,
@@ -237,7 +255,7 @@ function buildDisplayRows(
   >,
   weekDates: Date[],
 ): ScheduleRow[] {
-  return SCHEDULE_TIME_ROWS.map(({ label, start, end }) => {
+  return buildScheduleTimeRows(slotRangesByDate).map(({ label, start, end }) => {
     const cells: ScheduleCell[] = weekDates.map((date) => {
       const rangesForDay = slotRangesByDate[toISODate(date)] ?? [];
 
@@ -323,6 +341,9 @@ export default function FacultyView({
   const [weekSlotRanges, setWeekSlotRanges] = useState<
     Record<string, { start: number; end: number; mode: ConsultationMode; location: string }[]>
   >({});
+  // Bumped by the Availability tab whenever slots are saved so the Schedule
+  // tab refreshes right away instead of waiting on the realtime event.
+  const [slotsVersion, setSlotsVersion] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -364,7 +385,7 @@ export default function FacultyView({
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, [facultyId, scheduleWeekDates]);
+  }, [facultyId, scheduleWeekDates, slotsVersion]);
 
   // Jump to the Directory tab the moment the faculty starts typing a new
   // search (but never on mount/deep-link, even if a leftover search query
@@ -419,7 +440,17 @@ export default function FacultyView({
         />
       )}
 
-      {activeTab === 'settings' && <AvailabilityTab facultyId={facultyId} />}
+      {activeTab === 'settings' && (
+        <AvailabilityTab
+          facultyId={facultyId}
+          onSlotsChanged={(dateISO) => {
+            // Show the week of the slot that was just saved on the Schedule tab.
+            if (dateISO) setScheduleWeekStart(startOfWeek(new Date(`${dateISO}T00:00:00`)));
+            setSlotsVersion((v) => v + 1);
+          }}
+          onViewSchedule={() => setActiveTab('schedule')}
+        />
+      )}
 
       {activeTab === 'directory' && (
         <DirectoryTab searchQuery={searchQuery} currentFacultyId={facultyId} />
@@ -1328,7 +1359,15 @@ function mapDbSlot(row: DbAvailabilitySlot): TimeSlot {
   };
 }
 
-function AvailabilityTab({ facultyId }: { facultyId: string }) {
+function AvailabilityTab({
+  facultyId,
+  onSlotsChanged,
+  onViewSchedule,
+}: {
+  facultyId: string;
+  onSlotsChanged?: (dateISO?: string) => void;
+  onViewSchedule?: () => void;
+}) {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [recurring, setRecurring] = useState<RecurringSchedule[]>([]);
   const [loadingRecurring, setLoadingRecurring] = useState(true);
@@ -1555,6 +1594,8 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
     if (generatedDates.includes(selectedISO)) {
       loadSlotsRef.current?.();
     }
+    onSlotsChanged?.(freeDates[0] ?? generatedDates[0]);
+    setAddedNotice('Weekly schedule saved — it now shows as Available on the Schedule tab.');
   };
 
   const deleteRecurring = async (id: string) => {
@@ -1613,6 +1654,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
       window.alert(`${referenced.size} slot(s) with appointments were kept as one-time slots.`);
     }
     loadSlotsRef.current?.();
+    onSlotsChanged?.();
   };
 
   // ---------- Load individual slots for the selected day ----------
@@ -1759,6 +1801,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
         if (error || !data) throw new Error(error?.message ?? 'Could not update the slot.');
         setSlots((prev) => prev.map((item) => item.id === editTarget.id ? mapDbSlot(data as unknown as DbAvailabilitySlot) : item));
         setAddedNotice('Time slot updated successfully.');
+        onSlotsChanged?.(data.date as string);
       } else {
         const { data: ruleSlots, error } = await supabase.from('availability_slots').select('id,date').eq('rule_id',editTarget.id).gte('date',toISODate(new Date()));
         if (error) throw new Error(error.message);
@@ -1776,6 +1819,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
           if (slotError) throw new Error(slotError.message);
         }
         loadSlotsRef.current?.();
+        onSlotsChanged?.();
         setAddedNotice(booked.size ? `Weekly schedule updated. ${booked.size} booked slot(s) kept unchanged.` : 'Weekly schedule updated successfully.');
       }
       setEditTarget(null);
@@ -1801,7 +1845,9 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
         prev.map((s) => (s.id === id ? { ...s, enabled: slot.enabled } : s)),
       );
       window.alert(`Could not update that slot: ${error.message}`);
+      return;
     }
+    onSlotsChanged?.();
   };
 
   const deleteSlot = async (id: string) => {
@@ -1827,7 +1873,9 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
           ? "This slot has appointments on record and can't be deleted. Turn it off instead."
           : `Could not delete that slot: ${error.message}`,
       );
+      return;
     }
+    onSlotsChanged?.();
   };
 
   const openAddSlot = () => {
@@ -1840,25 +1888,38 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
     setIsAddingSlot(true);
   };
 
+  // "Save Availability": saves the slot currently being typed (if any), then
+  // refreshes the Schedule tab so the new time shows up as Available there.
+  const saveAvailability = async () => {
+    if (savingSlot) return;
+    if (isAddingSlot) {
+      await confirmAddSlot();
+      return;
+    }
+    loadSlotsRef.current?.();
+    onSlotsChanged?.();
+    setAddedNotice('Availability saved — your Schedule tab is up to date.');
+  };
+
   const cancelAddSlot = () => {
     setIsAddingSlot(false);
     setSlotError(null);
   };
 
-  const confirmAddSlot = async () => {
-    if (savingSlot) return;
+  const confirmAddSlot = async (): Promise<boolean> => {
+    if (savingSlot) return false;
 
     const startMinutes = parseTimeInput(newSlotStart);
     const endMinutes = parseTimeInput(newSlotEnd);
 
     if (startMinutes === null || endMinutes === null) {
       setSlotError('Enter valid times, such as 9:00 AM or 13:00.');
-      return;
+      return false;
     }
 
     if (startMinutes >= endMinutes) {
       setSlotError('End time must be after start time.');
-      return;
+      return false;
     }
 
     if (!newSlotLocation.trim()) {
@@ -1867,7 +1928,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
           ? 'Please enter a meeting link or platform (e.g. Google Meet, Zoom).'
           : 'Please enter a location (e.g. Room 204, CITE Building).',
       );
-      return;
+      return false;
     }
 
     const time = `${formatTime(startMinutes)} - ${formatTime(endMinutes)}`;
@@ -1880,7 +1941,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
     });
     if (overlaps) {
       setSlotError('That time overlaps another slot on this day.');
-      return;
+      return false;
     }
 
     setSavingSlot(true);
@@ -1905,10 +1966,16 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
 
     if (error || !data) {
       setSlotError(`Could not add that slot: ${error?.message ?? 'unknown error'}`);
-      return;
+      return false;
     }
 
-    setSlots((prev) => [...prev, mapDbSlot(data as unknown as DbAvailabilitySlot)]);
+    setSlots((prev) =>
+      [...prev, mapDbSlot(data as unknown as DbAvailabilitySlot)].sort((a, b) =>
+        (parseTimeInput(a.time.split(' - ')[0] ?? '') ?? 0) -
+        (parseTimeInput(b.time.split(' - ')[0] ?? '') ?? 0),
+      ),
+    );
+    onSlotsChanged?.(selectedISO);
     setIsAddingSlot(false);
     setSlotError(null);
     setAddedNotice(
@@ -1919,6 +1986,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
             day: 'numeric',
           })}.`,
     );
+    return true;
   };
 
   const renderEditModal = () => {
@@ -2224,6 +2292,15 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
           <div className="fv-slots-added-notice">
             <CheckSmallIcon />
             <span>{addedNotice}</span>
+            {onViewSchedule && (
+              <button
+                type="button"
+                className="fv-notice-link"
+                onClick={onViewSchedule}
+              >
+                View Schedule
+              </button>
+            )}
             <button
               type="button"
               aria-label="Dismiss"
@@ -2335,7 +2412,7 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
               <button
                 type="button"
                 className="fv-add-slot-confirm"
-                onClick={confirmAddSlot}
+                onClick={() => void confirmAddSlot()}
                 disabled={savingSlot}
               >
                 {savingSlot ? 'Adding…' : 'Add Slot'}
@@ -2390,11 +2467,10 @@ function AvailabilityTab({ facultyId }: { facultyId: string }) {
         <button
           type="button"
           className="fv-save-button"
-          onClick={() =>
-            setAddedNotice('All changes here are already saved automatically.')
-          }
+          onClick={saveAvailability}
+          disabled={savingSlot}
         >
-          Save Availability
+          {savingSlot ? 'Saving…' : 'Save Availability'}
         </button>
       </div>
       </div>

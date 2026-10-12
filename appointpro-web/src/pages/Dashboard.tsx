@@ -668,6 +668,7 @@ export default function Dashboard({
                   <button
                     type="button"
                     className="db-stat-card db-stat-card-clickable"
+                  
                     onClick={() => handleNavClick('appointments')}
                   >
                     <div className="db-stat-icon">
@@ -705,10 +706,11 @@ export default function Dashboard({
                 <section className="db-schedule-card">
                   <div className="db-schedule-header">
                     <h2>Today&apos;s Schedule</h2>
-
+ 
                     <button
                       type="button"
                       className="db-view-all"
+                      
                       onClick={() => handleNavClick('appointments')}
                     >
                       View All
@@ -954,7 +956,7 @@ function CalendarCard() {
           {MONTH_LABELS[viewMonth]} {viewYear}
         </span>
 
-        <button type="button" onClick={goNextMonth} aria-label="Next month">
+        <button type="button"  onClick={goNextMonth} aria-label="Next month">
           <ChevronRightIcon />
         </button>
       </div>
