@@ -1,0 +1,9 @@
+git reset --hard HEAD
+disabled={true}
+
+position: fixed;
+top: px or %;
+right: px or %;
+left: px or %;
+bottom: px or %;
+z-index: 100;

@@ -314,6 +314,32 @@ export default function Dashboard({
   // stays at 0 (honestly, not faked) until that workflow exists.
   const pendingReschedulesCount = 0;
 
+  // Shown under the stat cards when a card is clicked but has nothing to open.
+  const [emptyNotice, setEmptyNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!emptyNotice) return;
+    const timer = window.setTimeout(() => setEmptyNotice(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [emptyNotice]);
+
+  const handleReschedulesCardClick = () => {
+    if (pendingReschedulesCount === 0) {
+      setEmptyNotice('You have no pending reschedules.');
+      return;
+    }
+    setEmptyNotice(null);
+    handleNavClick('appointments');
+  };
+
+  const handleQueueCardClick = () => {
+    if (inQueueCount === 0) {
+      setEmptyNotice('There is no one in the queue right now.');
+      return;
+    }
+    setEmptyNotice(null);
+    handleNavClick('appointments');
+  };
+
   const facultyId = session.user.id;
 
   // Keeps today's queue running (joins, auto-start, reminders) on every page.
@@ -668,8 +694,7 @@ export default function Dashboard({
                   <button
                     type="button"
                     className="db-stat-card db-stat-card-clickable"
-                  
-                    onClick={() => handleNavClick('appointments')}
+                    onClick={handleReschedulesCardClick}
                   >
                     <div className="db-stat-icon">
                       <ClockIcon />
@@ -687,7 +712,7 @@ export default function Dashboard({
                   <button
                     type="button"
                     className="db-stat-card db-stat-card-clickable"
-                    onClick={() => handleNavClick('appointments')}
+                    onClick={handleQueueCardClick}
                   >
                     <div className="db-stat-icon">
                       <QueueIcon />
@@ -702,6 +727,12 @@ export default function Dashboard({
                     </span>
                   </button>
                 </section>
+
+                {emptyNotice && (
+                  <div className="db-empty-notice" role="status">
+                    {emptyNotice}
+                  </div>
+                )}
 
                 <section className="db-schedule-card">
                   <div className="db-schedule-header">
